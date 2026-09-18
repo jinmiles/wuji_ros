@@ -1,0 +1,56 @@
+{
+  "what": "T_cam1_from_mocap for the calibration named below, DERIVED not delivered",
+  "calibration": "20260824_v2",
+  "derived_by": "dextouch/mocaplink.py (run_calib.py mocap-link)",
+  "derived_utc": "2026-08-26T03:32:17Z",
+  "method": "The object's colour separates it from the scene, so the blue pixels of all four cameras back-project to a cloud of the object alone. The markers pose the delivered mesh in the mocap frame every frame. One rigid transform is fitted to carry the posed mesh onto those clouds across every frame of every session at once (coarse vertical-axis + yaw sweep, then joint ICP).",
+  "fitted_to": "colour-gated depth, which carries RealSense's outward bias",
+  "independent_check": "the marker spheres are white and never enter the colour mask, so their reprojection into the colour images is evidence this fit did not see (run_calib.py overlay)",
+  "sessions": [
+    {
+      "session": "20260824_173910_bare_hand_v2",
+      "frames_used": 72,
+      "points_used": 277791,
+      "icp_rms_mm": 9.02,
+      "marker_fit_residual_mm": 0.48,
+      "deviation_from_mean_deg": 0.496,
+      "deviation_from_mean_mm": 1.3
+    },
+    {
+      "session": "20260824_174012_fsr_fingertip_v2",
+      "frames_used": 70,
+      "points_used": 293654,
+      "icp_rms_mm": 9.47,
+      "marker_fit_residual_mm": 0.48,
+      "deviation_from_mean_deg": 0.496,
+      "deviation_from_mean_mm": 1.3
+    }
+  ],
+  "uncertainty": "The session-to-session spread above is the error bar: these recordings share one physical calibration, so anything they disagree about is this method's error. Replace this file with a delivered extrinsic when one is available.",
+  "T_world_from_mocap": [
+    [
+      -0.9994087547475502,
+      -0.004835039536434854,
+      -0.03404061290035537,
+      0.2774321814427634
+    ],
+    [
+      0.03398016356541474,
+      0.012077947363117028,
+      -0.9993495242764474,
+      0.2254822630091292
+    ],
+    [
+      0.005243035191412617,
+      -0.9999153692089019,
+      -0.011906510899785974,
+      0.0013886690881267094
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ]
+}

@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+
+# workspace: recordings, extracted datasets, results, ad hoc checks
+data/
+output/
+scratch/
+
+# local symlinks to externally licensed / large model assets (README "자산")
+assets/

@@ -1,3 +1,6 @@
 [submodule "third_party/wuji-sdk"]
 	path = third_party/wuji-sdk
 	url = https://github.com/wuji-technology/wuji-sdk.git
+[submodule "third_party/hamer"]
+	path = third_party/hamer
+	url = https://github.com/geopavlakos/hamer.git
