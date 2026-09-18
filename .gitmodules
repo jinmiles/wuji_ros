@@ -1,0 +1,3 @@
+[submodule "third_party/wuji-sdk"]
+	path = third_party/wuji-sdk
+	url = https://github.com/wuji-technology/wuji-sdk.git
