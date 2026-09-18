@@ -20,7 +20,8 @@ extract → calib check → keypoints(HaMeR) → segment → G1 → shape → V1
 | 위치 | 역할 |
 |---|---|
 | `wuji_ros/paths.py` | repo 경로, `data/`·`output/` 레이아웃, `assets/`·`calibration/` 경로의 단일 출처 |
-| `wuji_ros/bridge/` | 녹화 PC용 ROS2 노드. SDK frame → 메시지 필드 변환은 ROS 없이 테스트 가능한 순수 함수 |
+| `wuji_ros/bridge/convert.py` | SDK frame → 메시지 필드 값. ROS·SDK import 없는 순수 함수 (구현됨, `tests/test_bridge_convert.py`) |
+| `wuji_ros/bridge/node.py` | 녹화 PC용 ROS2 노드 `wuji_glove_bridge` (구현됨) |
 | `wuji_ros/bagio.py` | bag → `data/<session>/` (마스터 클럭 동기) |
 | `wuji_ros/rig.py` | 캘리브 로드, 투영/역투영, mocap → world |
 | `wuji_ros/keypoints.py` | `third_party/hamer` wrapper (sys.path 주입, `hamer.configs.CACHE_DIR_HAMER`를 `assets/hamer`로 지정) |
@@ -31,7 +32,7 @@ extract → calib check → keypoints(HaMeR) → segment → G1 → shape → V1
 | `wuji_ros/viz.py` | 전체 프레임 overlay, H.264 mp4 + gif |
 | `wuji_ros/evaluate.py` | 일치도 지표, 프레임별 라벨 |
 | `wuji_ros/cli.py`, `scripts/run.py` | 분석 entrypoint, 단계별 subcommand, `--force` |
-| `scripts/glove_bridge.py`, `launch/` | 브리지 entrypoint |
+| `scripts/glove_bridge.py` | 브리지 entrypoint (구현됨) |
 
 ## 데이터 레이아웃
 
@@ -91,7 +92,7 @@ output/<session>/<stage>/...         # 단계별 결과, 재실행 시 재사용
 
 | 대상 | 방식 | 버전 |
 |---|---|---|
-| Wuji SDK | 녹화 PC에 PyPI 설치, 예제는 `third_party/wuji-sdk` | `2026.8.31` (submodule `b0e4865`) |
+| Wuji SDK | 녹화 PC venv에 PyPI 설치(`requirements-bridge.txt`), 예제는 `third_party/wuji-sdk`. 휠이 glibc ≥ 2.34를 요구해 분석 서버(glibc 2.31)에서는 import 불가 | `2026.8.31` (submodule `b0e4865`) |
 | HaMeR | `third_party/hamer` submodule, 수정 없이 sys.path | upstream `3a01849` |
 | MANO, HaMeR checkpoint | `assets/` 심볼릭 링크 | README "자산" |
 

@@ -99,7 +99,7 @@
 | `wuji_ros/viz.py` | 전체 프레임 overlay, mp4(H.264)/gif |
 | `wuji_ros/evaluate.py` | 일치도 지표, 라벨 |
 | `wuji_ros/cli.py`, `scripts/run.py` | 분석 entrypoint 하나, 단계별 subcommand, `--force`로 재생성 |
-| `scripts/glove_bridge.py`, `launch/` | 브리지 entrypoint (녹화 PC) |
+| `scripts/glove_bridge.py` | 브리지 entrypoint (녹화 PC) |
 
 ---
 
@@ -153,10 +153,20 @@ EMF:                        p_wrist(t) = T_wrist_from_emftx · p_emftx(t)     # 
 | `/wuji_glove/right/hand_joint_angles` | `sensor_msgs/JointState` | 21 DoF, rad |
 | `/wuji_glove/right/imu_raw/palm` | `sensor_msgs/Imu` | 원시 각속도·가속도 (시간 동기 검증 + offline pipeline 입력) |
 | `/wuji_glove/right/imu_data/palm` | `sensor_msgs/Imu` | 융합 자세 (기울기 검증용, yaw 불사용) |
+| `/wuji_glove/right/info` | `std_msgs/String` (JSON, latched) | 세션 메타: SN, 펌웨어, SDK 버전, SDK user id, URDF 출처·경로·sha256, time sync 결과, 필드·관절 이름, `tf_static` 값 |
 | `/tf_static` | `tf2_msgs/TFMessage` | `r_wrist → r_hand_emf_tx`, `r_wrist → r_palm_imu_link` |
 
 - 표준 메시지만 쓴다(6절 결정). IMU 기반 `tf`(`waist → wrist`)는 yaw 드리프트 때문에 발행하지 않는다.
-- 세션 메타: SN, hand side, SDK 버전, SDK user, URDF 경로·해시, `tf_static` 값을 시작 시 로그와 latched 토픽으로 남긴다.
+- 녹화를 멈추는 조건:
+  - device stamp가 호스트 시계와 `--max-clock-skew`(기본 1 s) 넘게 다를 때. time sync 전에 찍힌 uptime stamp를 막는다.
+  - `emf_poses`가 `--stall-timeout`(기본 2 s) 동안 오지 않을 때.
+  - 관절·손가락 개수가 계약과 다를 때.
+- SDK user는 id만 기록한다. 표시 이름은 피험자 이름일 수 있어서다.
+- 뷰어는 따로 만들지 않고 `ros2 topic hz` / `ros2 topic echo`로 확인한다.
+- **wuji-sdk는 녹화 PC에서만 돈다.** 휠이 `manylinux_2_34`(glibc ≥ 2.34)인데, 분석 서버는 glibc 2.31이라 import가 실패한다(2026-09-18 확인).
+  raw `emf_poses`로 skeleton을 다시 계산하는 offline pipeline도 녹화 PC에서 돌려야 한다.
+- 구현(2026-09-18): `wuji_ros/bridge/convert.py`(순수 변환), `wuji_ros/bridge/node.py`, `scripts/glove_bridge.py`, `requirements-bridge.txt`.
+  변환 계약 테스트는 `tests/test_bridge_convert.py`. 실제 장갑·ROS 환경에서의 실행은 녹화 PC에서 확인해야 한다.
 - 수용 기준: bag에서 `hand_skeleton` ≈ 120 Hz, stamp 단조 증가, `|stamp − recv|` 분포 기록, 단위 m 확인.
 
 ### M2 — 실험 세팅·녹화

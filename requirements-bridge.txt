@@ -1,0 +1,3 @@
+# Recording PC venv (python3.10 -m venv --system-site-packages): rclpy, sensor_msgs_py,
+# tf2_ros and numpy come from ROS 2 Humble's system packages.
+wuji-sdk==2026.8.31
