@@ -92,7 +92,7 @@ output/<session>/<stage>/...         # 단계별 결과, 재실행 시 재사용
 
 | 대상 | 방식 | 버전 |
 |---|---|---|
-| Wuji SDK | 녹화 PC venv에 PyPI 설치(`requirements-bridge.txt`), 예제는 `third_party/wuji-sdk`. 휠이 glibc ≥ 2.34를 요구해 분석 서버(glibc 2.31)에서는 import 불가 | `2026.8.31` (submodule `b0e4865`) |
+| Wuji SDK | 녹화 PC의 python3.10 user site에 PyPI 설치(`requirements-bridge.txt`), 예제는 `third_party/wuji-sdk`. 휠이 glibc ≥ 2.34를 요구해 분석 서버(glibc 2.31)에서는 import 불가 | `2026.8.31` (submodule `b0e4865`) |
 | HaMeR | `third_party/hamer` submodule, 수정 없이 sys.path | upstream `3a01849` |
 | MANO, HaMeR checkpoint | `assets/` 심볼릭 링크 | README "자산" |
 

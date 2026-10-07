@@ -17,7 +17,7 @@ Wuji Glove + 4뷰 RealSense RGB-D + OptiTrack(물체) 녹화에서 오른손의 
 | `scripts/` | entrypoint. 현재 `glove_bridge.py`, 녹화 PC용 `shells/{setup_bridge,glove_bridge,record_glove}.sh` |
 | `tests/` | 데이터·계약 테스트 |
 | `environment.yml` | 분석 env `wuji_ros` 정의 |
-| `requirements-bridge.txt` | 녹화 PC 브리지 venv 정의 |
+| `requirements-bridge.txt` | 녹화 PC 브리지 의존성 (`python3.10 --user`) |
 | `third_party/wuji-sdk` | Wuji SDK 예제·문서 (submodule, 수정 금지) |
 | `third_party/hamer` | HaMeR upstream (submodule, 수정 금지) |
 | `assets/` | 외부 모델 자산 심볼릭 링크 (git-ignored) |
@@ -29,7 +29,7 @@ Wuji Glove + 4뷰 RealSense RGB-D + OptiTrack(물체) 녹화에서 오른손의 
 
 | 단계 | 어디서 | env |
 |---|---|---|
-| glove 브리지, `ros2 bag record` | 녹화 PC (장갑·카메라 같은 PC) | ROS 2 (glibc ≥ 2.34) system python3 venv + `wuji-sdk==2026.8.31` |
+| glove 브리지, `ros2 bag record` | 녹화 PC (장갑·카메라 같은 PC) | ROS2 Humble system python3.10 + `wuji-sdk==2026.8.31` (user site) |
 | bag 추출, HaMeR, MANO fit, 평가 | 분석 서버 | conda `wuji_ros` |
 
 분석 env 생성 (한 번):
@@ -55,10 +55,11 @@ conda run --no-capture-output -n wuji_ros python -m unittest discover -s tests -
 
 ## 녹화 PC: glove 브리지
 
-wuji-sdk 휠은 glibc ≥ 2.34를 요구한다. 그래서 브리지는 녹화 PC(Ubuntu 22.04 이상 + ROS 2)에서만 돈다. 스크립트는 셸에 이미 source된 ROS 2를 쓰고, 없으면 `/opt/ros/` 아래 하나뿐인 설치를 쓴다. 여러 개면 원하는 `setup.bash`를 먼저 source한다. venv는 rclpy가 빌드된 python으로 만든다. 버전은 `/opt/ros/<distro>/lib/python3.X/`에서 읽는다(Humble이면 `/usr/bin/python3.10`). 다르면 `ROS_PYTHON=<path>`로 지정한다. conda·pyenv python으로 만들면 `rclpy._rclpy_pybind11`을 찾지 못한다.
-rclpy, `sensor_msgs_py`, `tf2_ros`, numpy는 ROS의 system 패키지를 쓰므로, venv를 `--system-site-packages`로 만든다.
+wuji-sdk 휠은 glibc ≥ 2.34를 요구한다. 그래서 브리지는 녹화 PC(Ubuntu 22.04 + ROS2 Humble)에서만 돈다.
+mocap_ros_py와 같은 방식으로 venv 없이 `python3.10`으로 실행한다. rclpy가 python3.10용으로 빌드돼 있어서, 그냥 `python3`로 돌리면 `No module named 'rclpy._rclpy_pybind11'`이 난다(mocap_ros_py `e94e059`).
+wuji-sdk는 런타임 의존성이 없으므로 `--user`로 깔아도 ROS의 numpy 등은 바뀌지 않는다.
 
-처음 한 번 (repo를 받고 bridge venv `.venv-bridge`를 만든다):
+처음 한 번 (repo를 받고 `python3.10`에 wuji-sdk를 깐다):
 
 ```bash
 git clone https://github.com/jinmiles/wuji_ros.git
@@ -67,7 +68,7 @@ git submodule update --init third_party/wuji-sdk   # 캘리브레이션 예제�
 bash scripts/shells/setup_bridge.sh                # 마지막 줄에 "bridge env ok"
 ```
 
-녹화 전 캘리브레이션 (SDK 예제, `.venv-bridge`로 실행):
+녹화 전 캘리브레이션 (SDK 예제, `python3.10`으로 실행):
 
 - 손 모델: named user를 만든 뒤 `third_party/wuji-sdk/examples/python/wuji_glove/5.calibration.py`.
 - 촉각: `third_party/wuji-sdk/examples/python/wuji_glove/7.tactile_calibration.py`. 이 캘리브가 없으면 `tactile_binary`, `tactile_residual`이 나오지 않는다.

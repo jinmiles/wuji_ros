@@ -1,6 +1,5 @@
 __pycache__/
 *.pyc
-.venv-bridge/
 
 # workspace: recordings, extracted datasets, results, ad hoc checks
 data/
