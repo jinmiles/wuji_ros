@@ -55,7 +55,7 @@ conda run --no-capture-output -n wuji_ros python -m unittest discover -s tests -
 
 ## 녹화 PC: glove 브리지
 
-wuji-sdk 휠은 glibc ≥ 2.34를 요구한다. 그래서 브리지는 녹화 PC(Ubuntu 22.04 이상 + ROS 2)에서만 돈다. 스크립트는 셸에 이미 source된 ROS 2를 쓰고, 없으면 `/opt/ros/` 아래 하나뿐인 설치를 쓴다. 여러 개면 원하는 `setup.bash`를 먼저 source한다. venv는 ROS가 빌드된 시스템 python(`/usr/bin/python3`, 다르면 `ROS_PYTHON=<path>`)으로 만든다. conda·pyenv python으로 만들면 `rclpy._rclpy_pybind11`을 찾지 못한다.
+wuji-sdk 휠은 glibc ≥ 2.34를 요구한다. 그래서 브리지는 녹화 PC(Ubuntu 22.04 이상 + ROS 2)에서만 돈다. 스크립트는 셸에 이미 source된 ROS 2를 쓰고, 없으면 `/opt/ros/` 아래 하나뿐인 설치를 쓴다. 여러 개면 원하는 `setup.bash`를 먼저 source한다. venv는 rclpy가 빌드된 python으로 만든다. 버전은 `/opt/ros/<distro>/lib/python3.X/`에서 읽는다(Humble이면 `/usr/bin/python3.10`). 다르면 `ROS_PYTHON=<path>`로 지정한다. conda·pyenv python으로 만들면 `rclpy._rclpy_pybind11`을 찾지 못한다.
 rclpy, `sensor_msgs_py`, `tf2_ros`, numpy는 ROS의 system 패키지를 쓰므로, venv를 `--system-site-packages`로 만든다.
 
 처음 한 번 (repo를 받고 bridge venv `.venv-bridge`를 만든다):
