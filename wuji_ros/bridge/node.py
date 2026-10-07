@@ -339,9 +339,18 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def connect_glove(sn: Optional[str]) -> Tuple[Any, Any]:
-    """Connect the one Wuji Glove on the network (or the one with `sn`)."""
+def connect_glove(sn: Optional[str], address: Optional[str]) -> Tuple[Any, Any]:
+    """Connect the one Wuji Glove on the network (or the one with `sn`), or the glove at `address`.
+
+    `address` skips the SDK scan, whose discovery multicast leaves through the default-route
+    NIC and so misses a glove on a second, glove-only NIC.
+    """
     manager = SdkManager.instance()
+    if address is not None:
+        try:
+            return manager, manager.connect(address=address, device_name=f"glove_{HAND_SIDE}")
+        except WujiException as exc:
+            raise BridgeError(f"cannot connect to the glove at {address}: {exc}") from exc
     gloves = [device for device in manager.scan() if device.device_type == DeviceType.WujiGlove]
     if sn is not None:
         gloves = [device for device in gloves if device.sn == sn]
@@ -393,7 +402,10 @@ def describe_glove(manager: Any, glove: Any) -> Dict[str, Any]:
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=f"Publish the {HAND_SIDE}-hand Wuji Glove to {TOPIC_NS}/* for rosbag recording.")
-    parser.add_argument("--sn", default=None,
+    target = parser.add_mutually_exclusive_group()
+    target.add_argument("--address", default=None,
+                        help="glove ip:port, e.g. 192.168.1.101:50001; connects without the SDK scan")
+    target.add_argument("--sn", default=None,
                         help="glove serial number; needed only when several gloves are on the network")
     parser.add_argument("--max-clock-skew", type=float, default=1.0,
                         help="stop when a device stamp is further than this from the host clock, s "
@@ -410,7 +422,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     logger = rclpy.logging.get_logger(NODE_NAME)
     manager, node = None, None
     try:
-        manager, glove = connect_glove(args.sn)
+        manager, glove = connect_glove(args.sn, args.address)
         info = describe_glove(manager, glove)
         logger.info(f"glove: {json.dumps(info, sort_keys=True)}")
         node = GloveBridge(glove, info, args.max_clock_skew, args.stall_timeout)

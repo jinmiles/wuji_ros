@@ -34,7 +34,7 @@ for name in "${wired[@]}"; do
   ping_pids=()
   for i in $(seq 1 254); do ping -c1 -W1 -I "$src" "192.168.1.$i" >/dev/null 2>&1 & ping_pids+=($!); done
   wait "${ping_pids[@]}" 2>/dev/null || true
-  ip neigh show dev "$name" | grep -v FAILED | grep -v "^$src " || echo "   no device answered"
+  ip neigh show dev "$name" | grep -vE "FAILED|INCOMPLETE" | grep -v "^$src " || echo "   no device answered"
 done
 
 echo

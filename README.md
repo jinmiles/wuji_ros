@@ -80,6 +80,8 @@ bash scripts/shells/glove_bridge.sh                # 터미널 1. 장갑이 여�
 bash scripts/shells/record_glove.sh <name>         # 터미널 2. data/bags/<name>에 기록
 ```
 
+- 장갑 NIC가 기본 경로 NIC와 다르면 SDK scan(멀티캐스트)이 장갑을 못 찾는다(`No devices found`). 이때는 주소로 바로 연결한다: `bash scripts/shells/glove_bridge.sh --address 192.168.1.101:50001`.
+- 연결이 안 되면 `bash scripts/shells/glove_netcheck.sh`로 NIC, ARP 응답, 장갑 패킷을 확인한다. PC IP는 설명서대로 `192.168.1.50/24`(장갑 `.100`/`.101`과 겹치지 않게)로 둔다.
 - `record_glove.sh`는 `/wuji_glove/right/*` 전부와 `/tf_static`을 기록한다. 카메라·mocap 토픽은 뒤에 인자로 붙인다.
 - 브리지를 먼저 띄운다. `info`, `/tf_static`은 latched라서 녹화를 나중에 시작해도 bag에 들어간다.
 
