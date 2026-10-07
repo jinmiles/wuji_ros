@@ -14,7 +14,7 @@ Wuji Glove + 4뷰 RealSense RGB-D + OptiTrack(물체) 녹화에서 오른손의 
 | `docs/` | 구조(`ARCHITECTURE.md`), 미해결 항목(`TODO.md`), 실험 기록(`experiments/`) |
 | `calibration/<name>/` | 리그 캘리브 파일 (커밋). 현재 `20260824_v2` |
 | `wuji_ros/` | 파이썬 패키지. 현재 `bridge/`(glove → ROS2) |
-| `scripts/` | entrypoint. 현재 `glove_bridge.py` |
+| `scripts/` | entrypoint. 현재 `glove_bridge.py`, 녹화 PC용 `shells/{setup_bridge,glove_bridge,record_glove}.sh` |
 | `tests/` | 데이터·계약 테스트 |
 | `environment.yml` | 분석 env `wuji_ros` 정의 |
 | `requirements-bridge.txt` | 녹화 PC 브리지 venv 정의 |
@@ -58,28 +58,43 @@ conda run --no-capture-output -n wuji_ros python -m unittest discover -s tests -
 wuji-sdk 휠은 glibc ≥ 2.34를 요구한다. 그래서 브리지는 녹화 PC(Ubuntu 22.04 + ROS2 Humble)에서만 돈다.
 rclpy, `sensor_msgs_py`, `tf2_ros`, numpy는 ROS의 system 패키지를 쓰므로, venv를 `--system-site-packages`로 만든다.
 
-설치 (wuji_ros repo 루트에서 한 번):
+처음 한 번 (repo를 받고 bridge venv `.venv-bridge`를 만든다):
 
 ```bash
-source /opt/ros/humble/setup.bash
-python3.10 -m venv --system-site-packages .venv-bridge
-.venv-bridge/bin/python -m pip install -r requirements-bridge.txt
+git clone https://github.com/jinmiles/wuji_ros.git
+cd wuji_ros
+git submodule update --init third_party/wuji-sdk   # 캘리브레이션 예제용. 브리지 실행에는 필요 없다
+bash scripts/shells/setup_bridge.sh                # 마지막 줄에 "bridge env ok"
 ```
 
-실행 (wuji_ros repo 루트에서):
+녹화 전 캘리브레이션 (SDK 예제, `.venv-bridge`로 실행):
+
+- 손 모델: named user를 만든 뒤 `third_party/wuji-sdk/examples/python/wuji_glove/5.calibration.py`.
+- 촉각: `third_party/wuji-sdk/examples/python/wuji_glove/7.tactile_calibration.py`. 이 캘리브가 없으면 `tactile_binary`, `tactile_residual`이 나오지 않는다.
+
+녹화 (터미널 두 개, repo 루트에서):
 
 ```bash
-source /opt/ros/humble/setup.bash
-.venv-bridge/bin/python scripts/glove_bridge.py            # 장갑이 여러 개면 --sn <SN>
+bash scripts/shells/glove_bridge.sh                # 터미널 1. 장갑이 여러 개면 --sn <SN>
+bash scripts/shells/record_glove.sh <name>         # 터미널 2. data/bags/<name>에 기록
 ```
 
-- 발행 토픽: `/wuji_glove/right/{emf_poses, hand_skeleton, hand_joint_angles, imu_raw/palm, imu_data/palm, info}`, `/tf_static`.
+- `record_glove.sh`는 `/wuji_glove/right/*` 전부와 `/tf_static`을 기록한다. 카메라·mocap 토픽은 뒤에 인자로 붙인다.
+- 브리지를 먼저 띄운다. `info`, `/tf_static`은 latched라서 녹화를 나중에 시작해도 bag에 들어간다.
+
+- 발행 토픽: SDK의 Wuji Glove 스트림 전부(`plan.md` M1 표).
+  - 손 자세: `/wuji_glove/right/{emf_poses, tip_poses, hand_skeleton, hand_joint_angles}`
+  - IMU: `/wuji_glove/right/imu_raw/{palm,thumb,index,middle,ring,pinky}`, `/wuji_glove/right/imu_data/{...}`
+  - 촉각: `/wuji_glove/right/{tactile, tactile_binary, tactile_residual}`(24×31 `32FC1` 이미지), `/wuji_glove/right/tactile_zones/{palm,...,pinky}`, `/wuji_glove/right/tactile_point_cloud`
+  - 변환: `/wuji_glove/right/tf`(IMU 기반 `waist → r_wrist`, 전역 `/tf`에는 넣지 않음), `/tf_static`
+  - 메타: `/wuji_glove/right/info`
+- 시작 5 s 안에 frame이 없는 스트림은 경고로 남는다(녹화는 계속).
 - 모든 `header.stamp`는 장치의 `timestamp_us`(EMF 샘플링 시각, UTC)다.
 - 멈추는 조건:
   - device stamp가 호스트 시계와 1 s 넘게 다를 때(time sync 전).
   - `emf_poses`가 2 s 동안 오지 않을 때.
-  - 관절·손가락 개수가 계약과 다를 때.
-- 확인: `ros2 topic hz /wuji_glove/right/hand_skeleton`(≈ 120 Hz), `ros2 topic echo --once /wuji_glove/right/info`.
+  - 관절·손가락 개수, 촉각 taxel 수(24×31), 촉각 점 수(526)가 계약과 다를 때.
+- 확인: `ros2 topic hz /wuji_glove/right/hand_skeleton`(≈ 120 Hz), `ros2 topic echo --once /wuji_glove/right/info`(`sdk_topics`, `tactile_point_cloud_layout`).
 
 ## 자산
 

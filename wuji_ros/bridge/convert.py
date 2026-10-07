@@ -14,7 +14,15 @@ import numpy as np
 SKELETON_JOINTS = 21  # MediaPipe landmark order, same index order as OpenPose-21
 EMF_FINGERS = 5  # thumb, index, middle, ring, pinky
 SKELETON_FIELDS: Tuple[str, ...] = ("x", "y", "z", "confidence")
-EMF_FIELDS: Tuple[str, ...] = ("x", "y", "z", "qx", "qy", "qz", "qw", "confidence")
+# emf_poses and tip_poses: one row per finger, thumb..pinky.
+FINGER_POSE_FIELDS: Tuple[str, ...] = ("x", "y", "z", "qx", "qy", "qz", "qw", "confidence")
+IMU_LINKS: Tuple[str, ...] = ("palm", "thumb", "index", "middle", "ring", "pinky")
+# tactile, tactile_binary and tactile_residual: 744 taxels, row-major 24x31, -1.0 = invalid taxel.
+TACTILE_SHAPE: Tuple[int, int] = (24, 31)
+TACTILE_ZONES: Tuple[str, ...] = ("palm", "thumb", "index", "middle", "ring", "pinky")
+TACTILE_CLOUD_POINTS = 526  # active taxels of the 24x31 grid (SDK changelog, tactile_point_cloud contract)
+# Byte size per sensor_msgs/PointField datatype (INT8=1 .. FLOAT64=8).
+POINT_FIELD_SIZES: Dict[int, int] = {1: 1, 2: 1, 3: 2, 4: 2, 5: 4, 6: 4, 7: 4, 8: 8}
 
 FINGERS: Tuple[str, ...] = ("thumb", "index", "middle", "ring", "pinky")
 # Used slots of HandJointAngles.fingers[i].angles: the thumb uses all five, the
@@ -50,15 +58,15 @@ def skeleton_joint_names(skeleton: Any) -> List[str]:
     return [joint.name for joint in skeleton.joints]
 
 
-def emf_points(emf: Any) -> np.ndarray:
-    """EmfPoseArray -> (5, 8) float32 [x, y, z, qx, qy, qz, qw, confidence], thumb..pinky."""
-    poses = emf.poses
+def finger_pose_points(frame: Any, stream: str) -> np.ndarray:
+    """EmfPoseArray / FingertipPoses -> (5, 8) float32 [x, y, z, qx, qy, qz, qw, confidence], thumb..pinky."""
+    poses = frame.poses
     if len(poses) != EMF_FINGERS:
-        raise ValueError(f"emf_poses has {len(poses)} poses, expected {EMF_FINGERS}")
+        raise ValueError(f"{stream} has {len(poses)} poses, expected {EMF_FINGERS}")
     rows = []
-    for emf_pose in poses:
-        q = emf_pose.pose.orientation
-        rows.append([*emf_pose.pose.position, q.x, q.y, q.z, q.w, emf_pose.confidence])
+    for finger_pose in poses:
+        q = finger_pose.pose.orientation
+        rows.append([*finger_pose.pose.position, q.x, q.y, q.z, q.w, finger_pose.confidence])
     return np.array(rows, dtype=np.float32)
 
 
@@ -93,15 +101,53 @@ def imu_fields(imu: Any) -> Dict[str, Any]:
     return fields
 
 
-def side_transforms(transforms: Any, frame_prefix: str) -> List[Dict[str, Any]]:
-    """FrameTransforms -> this glove's static transforms, sorted by child frame.
+def tactile_grid(frame: Any, stream: str) -> np.ndarray:
+    """TactileFrame / TactileBinary / TactileResidual -> (24, 31) float32, values unchanged."""
+    data = frame.data
+    rows, cols = TACTILE_SHAPE
+    if len(data) != rows * cols:
+        raise ValueError(f"{stream} has {len(data)} taxels, expected {rows}x{cols}")
+    return np.asarray(data, dtype=np.float32).reshape(rows, cols)
 
-    tf_static is a global SDK topic merged over every connected device, so only the
-    transforms whose parent frame carries this glove's side prefix ("r_") are kept.
+
+def tactile_zone_values(zones: Any) -> Dict[str, np.ndarray]:
+    """TactileZones -> {zone: (n,) float32} for TACTILE_ZONES, values unchanged."""
+    return {zone: np.asarray(getattr(zones, zone), dtype=np.float32) for zone in TACTILE_ZONES}
+
+
+def cloud_layout(cloud: Any) -> Dict[str, Any]:
+    """SDK PointCloud -> PointCloud2 layout over the unchanged byte payload.
+
+    The SDK PointField.type is taken as the sensor_msgs/PointField datatype code; the
+    layout check below rejects codes or offsets that cannot be that encoding.
+    """
+    stride = int(cloud.point_stride)
+    data = bytes(cloud.data)
+    fields = [(field.name, int(field.offset), int(field.type)) for field in cloud.fields]
+    for name, offset, datatype in fields:
+        size = POINT_FIELD_SIZES.get(datatype)
+        if size is None or offset + size > stride:
+            raise ValueError(f"tactile_point_cloud field {name!r} (offset {offset}, type {datatype}) "
+                             f"does not fit a {stride}-byte point")
+    if stride <= 0 or len(data) % stride:
+        raise ValueError(f"tactile_point_cloud has {len(data)} bytes, not a multiple of point_stride {stride}")
+    width = len(data) // stride
+    if width != TACTILE_CLOUD_POINTS:
+        raise ValueError(f"tactile_point_cloud has {width} points, expected {TACTILE_CLOUD_POINTS}")
+    return {"fields": fields, "point_step": stride, "width": width, "data": data}
+
+
+def side_transforms(transforms: Any, frame_prefix: str) -> List[Dict[str, Any]]:
+    """FrameTransforms -> this glove's transforms, sorted by child frame.
+
+    tf and tf_static are global SDK topics merged over every connected device, so only
+    the transforms with this glove's side prefix ("r_") on either frame are kept
+    (tf_static: r_wrist -> r_*, tf: waist -> r_wrist).
     """
     records = []
     for transform in transforms.transforms:
-        if not transform.parent_frame_id.startswith(frame_prefix):
+        if not (transform.parent_frame_id.startswith(frame_prefix)
+                or transform.child_frame_id.startswith(frame_prefix)):
             continue
         q = transform.rotation
         records.append({

@@ -149,14 +149,20 @@ EMF:                        p_wrist(t) = T_wrist_from_emftx · p_emftx(t)     # 
 | 토픽 | 타입 | 내용 |
 |---|---|---|
 | `/wuji_glove/right/emf_poses` | `sensor_msgs/PointCloud2` | 5점, 필드 `x,y,z,qx,qy,qz,qw,confidence`, `frame_id=r_hand_emf_tx` — **raw, 재계산의 원천** |
+| `/wuji_glove/right/tip_poses` | `sensor_msgs/PointCloud2` | 5점, 필드는 `emf_poses`와 같음, `frame_id=r_wrist` (IK→FK 파생값) |
 | `/wuji_glove/right/hand_skeleton` | `sensor_msgs/PointCloud2` | 21점(MediaPipe 순서), 필드 `x,y,z,confidence`, `frame_id=r_wrist` |
 | `/wuji_glove/right/hand_joint_angles` | `sensor_msgs/JointState` | 21 DoF, rad |
-| `/wuji_glove/right/imu_raw/palm` | `sensor_msgs/Imu` | 원시 각속도·가속도 (시간 동기 검증 + offline pipeline 입력) |
-| `/wuji_glove/right/imu_data/palm` | `sensor_msgs/Imu` | 융합 자세 (기울기 검증용, yaw 불사용) |
+| `/wuji_glove/right/imu_raw/{palm,thumb,index,middle,ring,pinky}` | `sensor_msgs/Imu` | 원시 각속도·가속도 (시간 동기 검증 + offline pipeline 입력) |
+| `/wuji_glove/right/imu_data/{palm,thumb,index,middle,ring,pinky}` | `sensor_msgs/Imu` | 융합 자세 (기울기 검증용, yaw 불사용) |
+| `/wuji_glove/right/{tactile, tactile_binary, tactile_residual}` | `sensor_msgs/Image` `32FC1` | 24×31 row-major, `-1.0` = 무효 taxel. 각각 보정 압력, 접촉 여부(1/0), 접촉 잔차 |
+| `/wuji_glove/right/tactile_zones/{palm,thumb,index,middle,ring,pinky}` | `sensor_msgs/Image` `32FC1` | 영역별 값, 1×n (n은 `info.tactile_zone_sizes`) |
+| `/wuji_glove/right/tactile_point_cloud` | `sensor_msgs/PointCloud2` | 526 taxel 3D 점, SDK payload를 그대로 옮김 (필드는 `info.tactile_point_cloud_layout`) |
+| `/wuji_glove/right/tf` | `tf2_msgs/TFMessage` | IMU 기반 `waist → r_wrist`. yaw 드리프트가 있어 전역 `/tf`가 아니라 glove namespace에 기록만 한다 |
 | `/wuji_glove/right/info` | `std_msgs/String` (JSON, latched) | 세션 메타: SN, 펌웨어, SDK 버전, SDK user id, URDF 출처·경로·sha256, time sync 결과, 필드·관절 이름, `tf_static` 값 |
 | `/tf_static` | `tf2_msgs/TFMessage` | `r_wrist → r_hand_emf_tx`, `r_wrist → r_palm_imu_link` |
 
-- 표준 메시지만 쓴다(6절 결정). IMU 기반 `tf`(`waist → wrist`)는 yaw 드리프트 때문에 발행하지 않는다.
+- 표준 메시지만 쓴다(6절 결정).
+- SDK가 주는 Wuji Glove 스트림은 모두 기록한다(2026-10-07 결정). 이전에는 IMU 기반 `tf`(`waist → wrist`)를 발행하지 않았다. 지금은 `/wuji_glove/right/tf`에 기록만 하고, 손목 6D 소스로는 쓰지 않는다.
 - 녹화를 멈추는 조건:
   - device stamp가 호스트 시계와 `--max-clock-skew`(기본 1 s) 넘게 다를 때. time sync 전에 찍힌 uptime stamp를 막는다.
   - `emf_poses`가 `--stall-timeout`(기본 2 s) 동안 오지 않을 때.
@@ -165,6 +171,7 @@ EMF:                        p_wrist(t) = T_wrist_from_emftx · p_emftx(t)     # 
 - 뷰어는 따로 만들지 않고 `ros2 topic hz` / `ros2 topic echo`로 확인한다.
 - **wuji-sdk는 녹화 PC에서만 돈다.** 휠이 `manylinux_2_34`(glibc ≥ 2.34)인데, 분석 서버는 glibc 2.31이라 import가 실패한다(2026-09-18 확인).
   raw `emf_poses`로 skeleton을 다시 계산하는 offline pipeline도 녹화 PC에서 돌려야 한다.
+- 전체 스트림 확장(2026-10-07): tip_poses, 손가락 IMU 10개, tactile 계열, tf. `info.sdk_topics`에 장치가 제공하는 토픽 목록을 남겨 누락 여부를 확인한다.
 - 구현(2026-09-18): `wuji_ros/bridge/convert.py`(순수 변환), `wuji_ros/bridge/node.py`, `scripts/glove_bridge.py`, `requirements-bridge.txt`.
   변환 계약 테스트는 `tests/test_bridge_convert.py`. 실제 장갑·ROS 환경에서의 실행은 녹화 PC에서 확인해야 한다.
 - 수용 기준: bag에서 `hand_skeleton` ≈ 120 Hz, stamp 단조 증가, `|stamp − recv|` 분포 기록, 단위 m 확인.
