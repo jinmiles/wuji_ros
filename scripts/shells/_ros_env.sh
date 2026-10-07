@@ -9,4 +9,11 @@ if [[ -z "${ROS_DISTRO:-}" ]]; then
   set +u
   source "${ros_setups[0]}"
 fi
-echo "ROS 2 ${ROS_DISTRO}, $(python3 --version)" >&2
+# rclpy's C extension is built for the system python that ROS was built with; a conda or
+# pyenv python3 earlier on PATH cannot load it (No module named 'rclpy._rclpy_pybind11').
+ROS_PYTHON="${ROS_PYTHON:-/usr/bin/python3}"
+if ! "$ROS_PYTHON" -c "import rclpy" 2>/dev/null; then
+  echo "rclpy does not import with ${ROS_PYTHON} ($("$ROS_PYTHON" --version 2>&1)); set ROS_PYTHON to the python ROS 2 ${ROS_DISTRO} was built for" >&2
+  exit 1
+fi
+echo "ROS 2 ${ROS_DISTRO}, ${ROS_PYTHON} ($("$ROS_PYTHON" --version 2>&1))" >&2
