@@ -29,7 +29,7 @@ Wuji Glove + 4뷰 RealSense RGB-D + OptiTrack(물체) 녹화에서 오른손의 
 
 | 단계 | 어디서 | env |
 |---|---|---|
-| glove 브리지, `ros2 bag record` | 녹화 PC (장갑·카메라 같은 PC) | ROS2 Humble system python3.10 + `wuji-sdk==2026.8.31` |
+| glove 브리지, `ros2 bag record` | 녹화 PC (장갑·카메라 같은 PC) | ROS 2 (glibc ≥ 2.34) system python3 venv + `wuji-sdk==2026.8.31` |
 | bag 추출, HaMeR, MANO fit, 평가 | 분석 서버 | conda `wuji_ros` |
 
 분석 env 생성 (한 번):
@@ -55,7 +55,7 @@ conda run --no-capture-output -n wuji_ros python -m unittest discover -s tests -
 
 ## 녹화 PC: glove 브리지
 
-wuji-sdk 휠은 glibc ≥ 2.34를 요구한다. 그래서 브리지는 녹화 PC(Ubuntu 22.04 + ROS2 Humble)에서만 돈다.
+wuji-sdk 휠은 glibc ≥ 2.34를 요구한다. 그래서 브리지는 녹화 PC(Ubuntu 22.04 이상 + ROS 2)에서만 돈다. 스크립트는 셸에 이미 source된 ROS 2를 쓰고, 없으면 `/opt/ros/` 아래 하나뿐인 설치를 쓴다. 여러 개면 원하는 `setup.bash`를 먼저 source한다.
 rclpy, `sensor_msgs_py`, `tf2_ros`, numpy는 ROS의 system 패키지를 쓰므로, venv를 `--system-site-packages`로 만든다.
 
 처음 한 번 (repo를 받고 bridge venv `.venv-bridge`를 만든다):
