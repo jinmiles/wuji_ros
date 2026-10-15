@@ -4,7 +4,9 @@ Wuji Glove + 4뷰 RealSense RGB-D + OptiTrack(물체) 녹화에서 오른손의 
 손가락 관절은 glove가, 손 전체의 world 6D는 4뷰 RGB-D 정합이 맡는다.
 계획과 결정 사항은 [plan.md](plan.md), 구조와 좌표 규약은 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)에 있다.
 
-현재 상태: M1(glove 브리지) 녹화 PC에서 실행·녹화 확인(2026-10-15). stamp 단조성·지연·단위 확인은 남음.
+현재 상태:
+- M1(glove 브리지): 녹화 PC에서 실행·녹화 확인(2026-10-15). stamp 단조성·지연·단위 확인은 남음.
+- 분석: `extract → segment → keypoints → glovefit → fit / fit4 → calib → overlay / tactile`가 첫 세션 `1015-5`에서 돈다(2026-10-16). 결과는 `docs/experiments/001_glove_hand_pose/experiments.md`에 있다.
 
 ## 구성
 
@@ -97,3 +99,33 @@ ln -sfn /mnt/MV-SAM3D/submodules/Dyn-HaMR/_DATA/data/mano_mean_params.npz assets
 
 `hamer.ckpt`는 위치만 Dyn-HaMR 폴더일 뿐 HaMeR 공식 checkpoint다. Dyn-HaMR 코드는 쓰지 않는다.
 `MANO_RIGHT.pkl`은 md5 `fd5a9d35…`다. 예전 위치 `/mnt/EvalAI/assets/mano`는 2026-10-16 현재 마운트되어 있지 않다.
+
+## 분석 파이프라인
+
+stage마다 출력이 있으면 재사용하고, `--force`로 다시 만든다(`--force`이면 그 stage 출력을 비우고 시작한다). 모두 env `wuji_ros`에서 돈다. `segment`부터는 세션의 캘리브(`wuji_ros/rig.py: SESSION_CALIBRATION`)가 필요하다.
+
+```bash
+cd /home/user/extra_workdir/wuji_ros
+S=1015-5
+conda run --no-capture-output -n wuji_ros python scripts/run.py extract /home/user/extra_workdir/data/bags/1015-5_recovered --session $S --every 0.5
+conda run --no-capture-output -n wuji_ros python scripts/run.py segment   --session $S
+conda run --no-capture-output -n wuji_ros python scripts/run.py keypoints --session $S
+conda run --no-capture-output -n wuji_ros python scripts/run.py glovefit  --session $S
+conda run --no-capture-output -n wuji_ros python scripts/run.py fit       --session $S   # 카메라별 (calib 비교용)
+conda run --no-capture-output -n wuji_ros python scripts/run.py fit4      --session $S   # 4뷰 world (rig.SESSION_CALIBRATION 필요)
+conda run --no-capture-output -n wuji_ros python scripts/run.py calib     --session $S
+conda run --no-capture-output -n wuji_ros python scripts/run.py overlay   --session $S   # output/$S/overlay.{mp4,gif}
+conda run --no-capture-output -n wuji_ros python scripts/run.py tactile   --session $S   # output/$S/tactile.{mp4,gif}
+```
+
+| stage | 출력 (`output/<session>/`) |
+|---|---|
+| `extract` | `data/<session>/` (레이아웃은 `docs/ARCHITECTURE.md`) |
+| `segment` | `scene/table.npz` 테이블 평면·영역, `segment/NNNNNN.npz` 뷰별 1차 박스와 depth 손 후보 |
+| `keypoints` | `keypoints/<camera>/NNNNNN.npz` HaMeR 2D, 카메라 좌표계 회전, hand_pose, betas, 박스 출처; `keypoints/triangulated/NNNNNN.npz` 3D 관절 |
+| `glovefit` | `glovefit/NNNNNN.npz` G1 hand_pose, β, `T_wrist_from_mano`, 잔차 |
+| `fit` | `fit/<camera>/NNNNNN.npz` 카메라 좌표계 V1 |
+| `fit4` | `fit4/NNNNNN.npz` world V1 |
+| `calib` | `calib/report.json` 테이블 평면, 카메라별 손목 일치 |
+| `tactile` | `tactile/NNNNNN.jpg`, `tactile.mp4`, `tactile.gif`. 24×31 촉각 맵(binary 접촉 표시)과 영역별 최댓값 |
+| `overlay` | `overlay/NNNNNN.jpg`, `overlay.mp4`(H.264 yuv444p), `overlay.gif`. 카메라 위에는 손 mesh와 MANO 골격만 그린다. 재생은 추출 간격과 무관한 고정 `--fps`(프레임 순서) |
