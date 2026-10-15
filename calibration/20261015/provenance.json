@@ -1,0 +1,17 @@
+{
+  "what": "4-camera extrinsics for the 2026-10-15 recordings, DELIVERED (no mocap link)",
+  "calibration": "20261015",
+  "received": "2026-10-16T02:35+09:00, from the user (~/Downloads/'w2c_ext (1).npz', ~/Downloads/t2r_ext.npz)",
+  "sha256": {
+    "w2c_ext.npz": "5e33cc1985b28b6461cf57e1a0da101e7d05c25938ad920a4c5ae2bb8696bb20",
+    "t2r_ext.npz": "0052ebf0246de6532c2a451e03eee18273be222f381e1d37d298b535f7dd0ecf"
+  },
+  "format": "same as 20260824_v2: keys '0'..'3' = camera1..camera4, 3x4 T_cam_from_world; t2r_ext unused",
+  "mocap2cam": "not delivered; no mocap link for this calibration",
+  "checks_on_1015-5": {
+    "table_plane": "RANSAC plane of the white tabletop, fused over 4 views: 12.3 deg off world z, so world z is NOT the table normal (the board was not lying flat on the table). Per camera against that plane: tilt 0.47-1.23 deg, height -7.4..+3.8 mm (depth channel, white-surface bias applies). An earlier note here (tilt 0.6-2.6 deg vs world z, table at z ~ +44 mm) measured a horizontal slice of the tilted table and was wrong",
+    "hamer_triangulation": "DLT of HaMeR 2D over the views (keypoints stage, 102 frames): median residual 10.9 px, p90 24.3 px; earlier wrist+MCP-only check 8.5-13.9 px per camera, 20260824_v2 on the same data 37-146 px",
+    "per_camera_wrist_agreement": "independent per-camera V1 wrists carried into world agree to 25-42 mm per pair (20260824_v2: 192-213 mm for every pair with camera2)"
+  },
+  "world": "z-down (camera centres at z -0.57..-0.88 m); the tabletop is tilted 12.3 deg from world z"
+}
