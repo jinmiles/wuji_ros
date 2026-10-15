@@ -4,15 +4,6 @@ repo: `~/ros2_ws/src/wuji_ros`. 명령은 한 블록씩 붙여넣는다.
 
 ## 처음 한 번
 
-설치
-
-```bash
-cd ~/ros2_ws/src/wuji_ros && git pull && git submodule update --init third_party/wuji-sdk
-```
-```bash
-bash scripts/shells/setup_bridge.sh
-```
-
 네트워크 (장갑 포트 `enx00e04c681c5d`, PC `192.168.1.50`, 장갑 `192.168.1.101`)
 
 ```bash
@@ -31,20 +22,19 @@ sudo nmcli connection up wuji-glove
 sudo nmcli connection modify wuji-glove connection.interface-name enx00e04c681c5d
 ```
 
-## 피험자마다 (브리지·Studio 끈 상태)
+## 캘리브레이션 (Wuji Studio, 사람이 바뀔 때마다)
+
+사람이 바뀌면 새 프로필을 만들고 손 모델·촉각 캘리브레이션을 둘 다 다시 한다. 브리지는 끈 상태에서 한다.
 
 ```bash
-source /opt/ros/humble/setup.bash && cd ~/ros2_ws/src/wuji_ros/third_party/wuji-sdk/examples/python/wuji_glove
+wuji-studio
 ```
-```bash
-python3.10 4.user.py --user-name subj01 --list
-```
-```bash
-python3.10 5.calibration.py
-```
-```bash
-python3.10 7.tactile_calibration.py
-```
+
+1. 사용자 아이콘 → Create profile로 피험자 프로필(예: `subj01`)을 만들고 전환한다. Default 프로필은 쓰지 않는다.
+2. 장치 카드 → Connect.
+3. Calibration: 안내에 따라 6개 자세(엄지-검지/중지/약지/새끼 끝 맞대기, 네 손가락 90°, 손 펴기).
+4. Tactile Calibration: 아무것도 만지지 않은 상태로 안내되는 4개 동작. 끝나면 누른 부위가 빨간색으로 표시되는지 확인.
+5. Studio를 닫는다.
 
 ## 매번 녹화
 
@@ -54,11 +44,13 @@ python3.10 7.tactile_calibration.py
 nmcli device status; ip route get 192.168.1.101
 ```
 
-2. 촉각 확인 (착용 후, 브리지 끈 상태, `q`로 종료)
+2. 촉각 확인 (착용 후, 브리지 끈 상태)
 
 ```bash
-source /opt/ros/humble/setup.bash && cd ~/ros2_ws/src/wuji_ros/third_party/wuji-sdk/examples/python/wuji_glove && python3.10 8.tactile_contact_view.py
+wuji-studio
 ```
+
+Connect → Enter Visualization. 아무것도 만지지 않았는데 촉각 히트맵이 노란색이거나 값이 높으면 Tactile Calibration을 다시 한다. 확인 후 Studio를 닫는다.
 
 3. 브리지 (터미널 1)
 
