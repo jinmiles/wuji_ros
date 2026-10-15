@@ -22,7 +22,7 @@
   `hand_skeleton` / `tip_poses` / `hand_joint_angles`는 이 EMF를 hand URDF로 IK 한 **파생값**이다.
 - `hand_skeleton`: MediaPipe 21점, `frame_id = r_wrist`, 단위 m, EMF 소스 timestamp를 이어받는다.
 - `r_wrist` 축: X = 요측(radial), Z = 근위(손목→팔꿈치), Y = 오른손 법칙 → **오른손은 Y+가 손바닥 쪽**.
-- `tf_static`: `r_wrist → r_hand_emf_tx`, `r_wrist → r_palm_imu_link` (**평행이동만**, 1 Hz). 즉 palm IMU 축 = 손목 축.
+- `tf_static`: `r_wrist → r_hand_emf_tx`, `r_wrist → r_palm_imu_link` (1 Hz). 문서상 평행이동만이라 했으나 **회전이 있다**. 2026-10-15 실측(`WG1KA06260805538`, `info.tf_static`): 평행이동은 둘 다 `[0.0080, -0.0384, -0.0582]` m. 회전은 `r_hand_emf_tx`가 xyzw `[0.1171, -0.0338, 0.0147, 0.9924]`(약 13.6°), `r_palm_imu_link`가 `[0.7071, 0, 0, 0.7071]`(x축 90°). 즉 palm IMU 축 ≠ 손목 축이고, 기울기 검증은 이 회전을 적용한다. 값은 장갑·캘리브마다 bag의 `/tf_static`에서 읽는다.
 - **절대 위치 없음.** palm IMU 융합 자세는 roll·pitch가 중력 기준으로 장기 안정하다.
   반면 yaw는 자력계가 없어 스트림 시작 시 0에서 출발해 드리프트한다.
   → 손목 6D 소스로 쓰지 않고 **중력 방향(기울기) 검증**에만 쓴다.
@@ -116,7 +116,7 @@
 G1 (프레임별, world 없음):  kp_wrist(t)  ≈  J_MANO(θ_glove(t), β; T_wrist_from_mano(t))
 V1 (프레임별, 6-DoF):       T_world_from_wrist(t)  = argmin 4뷰 증거 | 손 모양 = MANO(θ_glove(t), β)
 최종:                       joints/vertices_world(t) = T_world_from_wrist(t) · T_wrist_from_mano(t) · MANO(θ(t), β)
-EMF:                        p_wrist(t) = T_wrist_from_emftx · p_emftx(t)     # tf_static, 평행이동만
+EMF:                        p_wrist(t) = T_wrist_from_emftx · p_emftx(t)     # tf_static (회전 포함, bag에서 읽음)
 ```
 
 - 인덱스 대응: MediaPipe-21 = OpenPose-21 순서라 인덱스 매핑은 항등이다.

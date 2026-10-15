@@ -79,8 +79,8 @@ output/<session>/<stage>/...         # 단계별 결과, 재실행 시 재사용
 
 - `hand_skeleton`: MediaPipe 21점, `r_wrist` 프레임, m. MediaPipe-21과 OpenPose-21은 인덱스 순서가 같다.
 - `r_wrist` 축: X 요측, Z 근위(손목→팔꿈치), Y = Z × X (오른손은 손바닥 쪽).
-- `emf_poses`: `r_hand_emf_tx` 프레임. `T_wrist_from_emftx`는 `tf_static`(평행이동만)이다.
-- palm IMU 축 = 손목 축. roll·pitch만 신뢰하고 yaw는 드리프트한다.
+- `emf_poses`: `r_hand_emf_tx` 프레임. `T_wrist_from_emftx`는 `tf_static`이다(회전 포함, 2026-10-15 실측 약 13.6°). bag의 `/tf_static`에서 읽는다.
+- palm IMU 축은 손목 축과 다르다: `T_wrist_from_palmimu`의 회전이 x축 90°다(2026-10-15 실측). roll·pitch만 신뢰하고 yaw는 드리프트한다.
 
 ## 시간 규약
 
