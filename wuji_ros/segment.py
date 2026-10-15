@@ -6,8 +6,12 @@ scene  The table: RANSAC plane of the bright (white) points of the first full
        ~12 deg off world z in the 20261015 calibration.
 boxes  Per frame, the 4-view depth fused into world. Candidates are points over
        the footprint, 1.2-35 cm above the table, and dark in RGB (the black glove
-       and sleeve; the bare left hand and light clothing drop out). Of the largest
-       connected cluster (2 cm voxels), the arm enters over the footprint's edge;
+       and sleeve; the bare left hand and light clothing drop out), outside the
+       static scene: 2 cm voxels that hold candidates in at least STATIC_FRACTION of
+       the session's frames (on 1015-5, the checkerboard box at the table's corner,
+       which otherwise became a hand while the real one was in the lap, t 19-22 s).
+       A largest connected cluster (2 cm voxels) under MIN_HAND_POINTS is no hand.
+       Of that cluster, the arm enters over the footprint's edge;
        the hand is the part farthest from that entry (HAND_REACH_M). With no entry
        (the glove lying on the table) the whole cluster is the hand. Its points,
        projected into every view, give that view's first box; keypoints.py then
@@ -23,6 +27,8 @@ points hand_points(): fused depth within HAND_RADIUS_M of the triangulated HaMeR
 
 from __future__ import annotations
 
+import json
+import shutil
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
@@ -44,6 +50,8 @@ EDGE_M = 0.02  # footprint margin counted as "the arm comes in here"
 HAND_REACH_M = 0.13  # hand = cluster points within this of the farthest point from the entry
 BOX_MARGIN = 0.15
 MIN_BOX_POINTS = 30
+MIN_HAND_POINTS = 200  # the glove gives 1000+ at STRIDE 3; static clutter gave 56-82
+STATIC_FRACTION = 0.8  # 0.5 also took the hand: it hovers over the same spot for half of 1015-5
 HAND_RADIUS_M = 0.03
 STRIDE = 3  # px stride for the box stage cloud
 POINT_STRIDE = 2  # px stride for hand_points
@@ -158,15 +166,37 @@ def _largest_cluster(Q: np.ndarray) -> np.ndarray:
     return Q[lab[inv] == big]
 
 
-def hand_candidate(s: Session, rig: Rig, table: Table, frame_id: int) -> np.ndarray:
-    """World points of the hand by depth + RGB alone (box stage)."""
+def dark_points(s: Session, rig: Rig, table: Table, frame_id: int) -> np.ndarray:
+    """Dark points over the table footprint within the hand's height range."""
     P, C, _ = fused_cloud(s, rig, frame_id, STRIDE)
     h = table.height(P)
     sel = (h > HEIGHT_RANGE_M[0]) & (h < HEIGHT_RANGE_M[1]) & (C[:, 2] < DARK_V) & table.over(P[:, :2])
-    Q = P[sel]
-    if len(Q) < MIN_BOX_POINTS:
+    return P[sel]
+
+
+def _voxels(Q: np.ndarray) -> np.ndarray:
+    return np.unique(np.floor(Q / VOXEL_M).astype(np.int64), axis=0)
+
+
+def static_voxels(per_frame: List[np.ndarray]) -> set:
+    """2 cm voxels holding dark candidates in at least STATIC_FRACTION of the frames."""
+    counts: Dict[tuple, int] = {}
+    for Q in per_frame:
+        for v in map(tuple, _voxels(Q)):
+            counts[v] = counts.get(v, 0) + 1
+    return {v for v, n in counts.items() if n >= STATIC_FRACTION * len(per_frame)}
+
+
+def hand_candidate(Q: np.ndarray, table: Table, static: set) -> np.ndarray:
+    """World points of the hand by depth + RGB alone (box stage), from dark_points()."""
+    if static and len(Q):
+        keep = np.array([tuple(v) not in static for v in np.floor(Q / VOXEL_M).astype(np.int64)])
+        Q = Q[keep]
+    if len(Q) < MIN_HAND_POINTS:
         return np.zeros((0, 3))
     Q = _largest_cluster(Q)
+    if len(Q) < MIN_HAND_POINTS:
+        return np.zeros((0, 3))
     edge = ~table.over(Q[:, :2], inner=True)
     if edge.sum() < 20:
         return Q
@@ -202,14 +232,19 @@ def run(session: str, force: bool = False) -> None:
         np.savez(scene / "table.npz", up=t.up, offset=t.offset, origin=t.origin, footprint=t.footprint, inner=t.inner)
     table = load_table(session)
     out = stage_dir(session, "segment")
-    out.mkdir(parents=True, exist_ok=True)
+    if (out / "summary.json").is_file() and not force:
+        LOGGER.info("%s exists, skipping (use --force)", out)
+        return
+    if out.is_dir():
+        shutil.rmtree(out)
+    out.mkdir(parents=True)
+    dark = {f: dark_points(s, rig, table, f) for f in s.frame_ids}
+    static = static_voxels(list(dark.values()))
+    LOGGER.info("static scene: %d voxels of 2 cm left out", len(static))
     found = 0
     for f in s.frame_ids:
         target = out / f"{frame_name(f)}.npz"
-        if target.is_file() and not force:
-            found += 1
-            continue
-        hand = hand_candidate(s, rig, table, f)
+        hand = hand_candidate(dark[f], table, static)
         boxes = np.zeros((len(s.cameras), 4))
         valid = np.zeros(len(s.cameras), bool)
         if len(hand) >= MIN_BOX_POINTS:
@@ -221,6 +256,9 @@ def run(session: str, force: bool = False) -> None:
                     boxes[ci], valid[ci] = b, True
             found += 1
         np.savez(target, boxes=boxes, box_valid=valid, hand_world=hand.astype(np.float32))
+    (out / "summary.json").write_text(json.dumps({
+        "frames": len(s.frame_ids), "with_hand": found, "static_voxels": len(static),
+        "static_fraction": STATIC_FRACTION, "min_hand_points": MIN_HAND_POINTS}, indent=2) + "\n")
     LOGGER.info("%s: hand candidate in %d/%d frames", session, found, len(s.frame_ids))
 
 
