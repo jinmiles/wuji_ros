@@ -63,6 +63,7 @@ wuji-sdk 휠이 glibc ≥ 2.34를 요구해서 브리지는 녹화 PC(Ubuntu 22.
 bash scripts/shells/setup_bridge.sh                       # 처음 한 번. 마지막 줄에 "bridge env ok"
 bash scripts/shells/glove_bridge.sh                       # 터미널 1. 검색이 안 되면 --address 192.168.1.101:50001
 bash scripts/shells/record_glove.sh subj01_take01         # 터미널 2. data/bags/subj01_take01에 기록
+bash scripts/shells/record_glove.sh subj01_take01 --all   # 카메라 등 ROS 토픽 전부 함께 기록
 ```
 
 - 발행 토픽: SDK의 Wuji Glove 스트림 전부(`plan.md` M1 표).

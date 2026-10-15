@@ -148,7 +148,14 @@ cd ~/ros2_ws/src/wuji_ros && bash scripts/shells/record_glove.sh subj01_take01
 ```
 
 - `data/bags/<이름>/`에 sqlite3 bag으로 저장된다. 이름이 이미 있으면 실패하니 매번 새 이름을 쓴다.
-- 장갑 토픽 전부와 `/tf_static`을 기록한다. 카메라·mocap 토픽은 뒤에 이름을 붙이면 같이 기록된다: `bash scripts/shells/record_glove.sh subj01_take01 /camera1/color/image_raw /camera1/aligned_depth_to_color/image_raw`
+- 기본은 장갑 토픽 전부와 `/tf_static`만 기록한다. 카메라·mocap 토픽은 뒤에 이름을 붙이면 같이 기록된다: `bash scripts/shells/record_glove.sh subj01_take01 /camera1/color/image_raw /camera1/aligned_depth_to_color/image_raw`
+- ROS 그래프의 모든 토픽(카메라, mocap, `/tf` 등, 녹화 중에 새로 뜨는 토픽 포함)을 함께 기록하려면 `--all`을 붙인다. 카메라의 `compressed`, `compressedDepth`, `theora` 중복 토픽은 뺀다(용량과 카메라 노드 CPU를 아끼려고).
+
+```bash
+cd ~/ros2_ws/src/wuji_ros && bash scripts/shells/record_glove.sh subj01_take01 --all
+```
+
+- `--all` 전에 장갑 브리지, 카메라, mocap 노드를 모두 띄우고 `ros2 topic list`로 확인한다. 카메라 4대 원본 color+depth는 장갑보다 훨씬 커서(대략 수십~100 MB/s) `df -h ~/ros2_ws`로 디스크 여유를 먼저 본다.
 - 브리지를 먼저 띄운다. `info`와 `/tf_static`은 latched라서 녹화를 나중에 시작해도 bag에 들어간다.
 - 종료는 Ctrl+C. `Recording stopped`가 나올 때까지 기다린다.
 
