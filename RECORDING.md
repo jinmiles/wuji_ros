@@ -161,6 +161,23 @@ cd ~/ros2_ws/src/wuji_ros && bash scripts/shells/record_glove.sh subj01_take01 -
 
 ### 2-6. bag 확인
 
+토픽별 개수, Hz, 빈 토픽(`<- EMPTY`), 용량을 한 번에 본다:
+
+```bash
+cd ~/ros2_ws/src/wuji_ros && bash scripts/shells/check_bag.sh subj01_take01
+```
+
+재생해서 실제로 보려면(터미널 두 개, 녹화 노드와 브리지는 끈 상태):
+
+```bash
+source /opt/ros/humble/setup.bash && cd ~/ros2_ws/src/wuji_ros && ros2 bag play data/bags/subj01_take01
+```
+```bash
+source /opt/ros/humble/setup.bash && ros2 topic hz /wuji_glove/right/hand_skeleton
+```
+
+`ros2 bag info`만 볼 때:
+
 ```bash
 source /opt/ros/humble/setup.bash && ros2 bag info data/bags/subj01_take01
 ```
