@@ -107,9 +107,8 @@ class GloveBridge(Node):
             for name in ("emf_poses", "tip_poses", "hand_skeleton", "tactile_point_cloud")
         }
         self._angles_pub = self.create_publisher(JointState, f"{TOPIC_NS}/hand_joint_angles", STREAM_QOS)
-        self._imu_pubs = {
-            name: self.create_publisher(Imu, f"{TOPIC_NS}/{name}", STREAM_QOS) for name in IMU_STREAMS
-        }
+        # Created in start() only for the IMUs this glove has, so absent ones leave no empty topic.
+        self._imu_pubs: Dict[str, Any] = {}
         self._image_pubs = {
             name: self.create_publisher(Image, f"{TOPIC_NS}/{name}", STREAM_QOS)
             for name in (*TACTILE_GRID_STREAMS, *TACTILE_ZONE_STREAMS)
@@ -153,9 +152,13 @@ class GloveBridge(Node):
             ("tf_static", manager.tf_static, self._on_tf_static),
         ]
         for stream, resource, callback in streams:
+            if stream in IMU_STREAMS:
+                self._imu_pubs[stream] = self.create_publisher(Imu, f"{TOPIC_NS}/{stream}", STREAM_QOS)
             try:
                 self._sdk_subs.append(resource().subscribe_with_callback(callback, self._on_sdk_error))
             except WujiException as exc:
+                if stream in self._imu_pubs:
+                    self.destroy_publisher(self._imu_pubs.pop(stream))
                 # The SDK exposes every Wuji Glove stream, but a given glove need not carry
                 # the sensor (e.g. no finger IMUs: "Path not found: imu_raw/thumb").
                 if stream in REQUIRED_STREAMS:
