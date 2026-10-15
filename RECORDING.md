@@ -24,17 +24,16 @@ sudo nmcli connection modify wuji-glove connection.interface-name enx00e04c681c5
 
 ## 캘리브레이션 (Wuji Studio, 사람이 바뀔 때마다)
 
-사람이 바뀌면 새 프로필을 만들고 손 모델·촉각 캘리브레이션을 둘 다 다시 한다. 브리지는 끈 상태에서 한다.
+사람이 바뀌면 손 모델·촉각 캘리브레이션을 둘 다 다시 한다. 브리지는 끈 상태에서 한다.
 
 ```bash
 wuji-studio
 ```
 
-1. 사용자 아이콘 → Create profile로 피험자 프로필(예: `subj01`)을 만들고 전환한다. Default 프로필은 쓰지 않는다.
-2. 장치 카드 → Connect.
-3. Calibration: 안내에 따라 6개 자세(엄지-검지/중지/약지/새끼 끝 맞대기, 네 손가락 90°, 손 펴기).
-4. Tactile Calibration: 아무것도 만지지 않은 상태로 안내되는 4개 동작. 끝나면 누른 부위가 빨간색으로 표시되는지 확인.
-5. Studio를 닫는다.
+1. 장치 카드 → Connect.
+2. Calibration: 안내에 따라 6개 자세(엄지-검지/중지/약지/새끼 끝 맞대기, 네 손가락 90°, 손 펴기).
+3. Tactile Calibration: 아무것도 만지지 않은 상태로 안내되는 4개 동작. 끝나면 누른 부위가 빨간색으로 표시되는지 확인.
+4. Studio를 닫는다.
 
 ## 매번 녹화
 
