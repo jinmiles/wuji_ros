@@ -3,7 +3,8 @@
 overlay  2x2 montage of the four whole camera frames (camera1 camera2 / camera3
          camera4), never cropped. On each view only the fitted hand: the MANO mesh
          (shaded, translucent) and its 21-joint skeleton, from the 4-view world fit
-         (fit4) projected into every view, else that camera's own fit.
+         (fit4) projected into every view; a session without a calibration shows
+         each camera's own fit instead.
 tactile  The glove's 24x31 tactile map per frame (pressure colour, grey = invalid
          taxel, white box = binary contact) with each zone's maximum, on its own,
          so it never covers the camera images.
@@ -152,7 +153,7 @@ def run(session: str, fps: float = 2.0, force: bool = False) -> None:
                 notes.append(f"{cam}: reproj {np.median(world['reproj_px'][views.index(cam)]):.1f}px"
                              if cam in views else f"{cam}: no HaMeR")
                 continue
-            fit = handfit.load(session, cam, f)
+            fit = handfit.load(session, cam, f) if rig is None else None  # calibrated: only the 4-view fit
             if fit is None:
                 tiles.append(img)
                 notes.append(f"{cam}: no fit")
@@ -162,7 +163,8 @@ def run(session: str, fps: float = 2.0, force: bool = False) -> None:
                          f"  tilt {float(fit['gravity_err_deg']):.0f}deg")
         grid = np.vstack([np.hstack(tiles[:2]), np.hstack(tiles[2:4])])
         t = float(s.rows[f]["master_stamp"]) - float(s.rows[s.frame_ids[0]]["master_stamp"])
-        source = f"4-view world fit, calibration {rig.name}" if world is not None else "per-camera fit"
+        source = (f"4-view world fit, calibration {rig.name}" if world is not None
+                  else "no 4-view fit for this frame" if rig is not None else "per-camera fit")
         lines = [f"{session}  frame {frame_name(f)}.png   t={t:.1f}s   MANO mesh + skeleton: glove fingers, posed by {source}",
                  "   |   ".join(notes)]
         if world is not None:
