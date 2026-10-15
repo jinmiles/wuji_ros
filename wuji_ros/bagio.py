@@ -44,7 +44,11 @@ OBJECT_POSE_TOPIC = "/RigidBody/pose"
 # glove npz keys: skeleton_wrist (21,3) m and skeleton_confidence (21,) in r_wrist;
 # emf_poses / tip_poses (5,8) x,y,z,qx,qy,qz,qw,confidence (frames r_hand_emf_tx /
 # r_wrist); joint_angles (21,) rad; accel_wrist (3,) raw palm accelerometer rotated
-# into r_wrist; gravity_wrist (3,) unit, = -accel_wrist / |accel_wrist|.
+# into r_wrist; gravity_wrist (3,) unit, = -accel_wrist / |accel_wrist| (only gravity
+# while the hand is still); R_waist_from_wrist (3,3) from the SDK's fused IMU pose
+# (/wuji_glove/right/tf), and gravity_wrist_fused (3,) = R_waist_from_wrist^T (0,0,-1)
+# (waist is z-up: this matches gravity_wrist within 0.1-3.9 deg at rest on 1015-5).
+# Only its roll/pitch mean anything; the fused yaw drifts.
 # Tactile (32FC1, -1 = invalid taxel): tactile / tactile_binary / tactile_residual
 # (24,31) row-major; tactile_zone_<zone> (n,); tactile_points (526,3) m in r_wrist
 # with tactile_pressure (526,), the SDK's taxel cloud as recorded.
@@ -55,6 +59,7 @@ GLOVE_STREAMS = {
     "tips": f"{GLOVE_NS}/tip_poses",
     "angles": f"{GLOVE_NS}/hand_joint_angles",
     "imu": f"{GLOVE_NS}/imu_raw/palm",
+    "imu_tf": f"{GLOVE_NS}/tf",
     "tactile": f"{GLOVE_NS}/tactile",
     "tactile_binary": f"{GLOVE_NS}/tactile_binary",
     "tactile_residual": f"{GLOVE_NS}/tactile_residual",
@@ -136,13 +141,18 @@ class _Bag:
         return topic in self.topics
 
     def stamps(self, topics: Sequence[str]) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
-        """Header stamps and row ids, read from the first bytes of each message only."""
+        """Header stamps and row ids, read from the first bytes of each message only.
+
+        A TFMessage starts with its sequence length, so its first transform's stamp
+        sits 4 bytes later than a message header's.
+        """
         out: Dict[str, Tuple[List[float], List[int]]] = {t: ([], []) for t in topics}
+        skip = {self.topics[t][0]: 4 if self.topics[t][1] == "tf2_msgs/msg/TFMessage" else 0 for t in topics}
         ids = ",".join(str(self.topics[t][0]) for t in topics)
         for rowid, tid, head in self.con.execute(
-                f"select id, topic_id, substr(data, 1, 16) from messages where topic_id in ({ids})"):
+                f"select id, topic_id, substr(data, 1, 20) from messages where topic_id in ({ids})"):
             s, r = out[self.names[tid]]
-            s.append(_header_stamp(head))
+            s.append(_header_stamp(head[skip[tid]:]))
             r.append(rowid)
         result = {}
         for t, (s, r) in out.items():
@@ -285,6 +295,10 @@ def extract(bag_path: Path, session: Optional[str] = None, every_s: float = 0.5,
                 elif key == "tactile_cloud":
                     c = _cloud(msg)
                     g["tactile_points"], g["tactile_pressure"] = c[:, :3], c[:, 3]
+                elif key == "imu_tf":
+                    q = msg.transforms[0].transform.rotation
+                    R = _quat_matrix([q.x, q.y, q.z, q.w])
+                    g["R_waist_from_wrist"], g["gravity_wrist_fused"] = R, R.T @ np.array([0.0, 0.0, -1.0])
                 elif key == "imu" and R_wrist_from_imu is not None:
                     a = msg.linear_acceleration
                     acc = R_wrist_from_imu @ np.array([a.x, a.y, a.z])
