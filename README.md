@@ -89,11 +89,11 @@ MANO와 HaMeR checkpoint는 크고 별도 라이선스라 repo에 넣지 않는�
 ```bash
 cd /home/user/extra_workdir/wuji_ros
 mkdir -p assets/hamer/data
-ln -sfn /mnt/EvalAI/assets/mano assets/mano
-ln -sfn /mnt/EvalAI/assets/mano assets/hamer/data/mano
+ln -sfn /mnt/MV-SAM3D/submodules/Dyn-HaMR/_DATA/data/mano assets/mano
+ln -sfn /mnt/MV-SAM3D/submodules/Dyn-HaMR/_DATA/data/mano assets/hamer/data/mano
 ln -sfn /mnt/MV-SAM3D/submodules/Dyn-HaMR/_DATA/hamer_ckpts assets/hamer/hamer_ckpts
 ln -sfn /mnt/MV-SAM3D/submodules/Dyn-HaMR/_DATA/data/mano_mean_params.npz assets/hamer/data/mano_mean_params.npz
 ```
 
 `hamer.ckpt`는 위치만 Dyn-HaMR 폴더일 뿐 HaMeR 공식 checkpoint다. Dyn-HaMR 코드는 쓰지 않는다.
-`MANO_RIGHT.pkl`은 두 위치의 파일이 같다(md5 `fd5a9d35…`).
+`MANO_RIGHT.pkl`은 md5 `fd5a9d35…`다. 예전 위치 `/mnt/EvalAI/assets/mano`는 2026-10-16 현재 마운트되어 있지 않다.
