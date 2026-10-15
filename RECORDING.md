@@ -87,6 +87,8 @@ python3.10 8.tactile_contact_view.py
 - `7.tactile_calibration.py`: 촉각(빈손, 4개 동작). 없으면 `tactile_binary`, `tactile_residual`이 나오지 않는다.
 - `8.tactile_contact_view.py`: 누른 부위가 `#`로 보이면 된다. `q`로 종료.
 - Wuji Studio의 Calibration 화면으로 해도 같은 위치에 저장된다.
+- 한 번 해 두면 장갑을 벗었다 껴도, PC를 재부팅해도 유지된다. 손 모델은 SDK 사용자 + 좌/우 단위(같은 쪽이면 다른 장갑도 유지), 촉각은 SDK 사용자 + 장갑 SN 단위로 저장된다. 다른 장갑을 쓰면 촉각만 새로 한다.
+- 손 모델을 다시 할 때(설명서): 떨어뜨리거나 충격을 받은 뒤, 오래 쓰지 않은 뒤(3개월마다 점검), 데이터가 이상할 때, 수리 후. 원시 `emf_poses`를 녹화하므로 손 모델을 나중에 다시 보정해도 녹화본의 skeleton은 offline으로 다시 계산할 수 있다.
 
 ## 2. 매번 녹화할 때
 
@@ -100,7 +102,22 @@ nmcli device status; ip route get 192.168.1.101
 
 `enx00e04c681c5d … connected wuji-glove`와 `192.168.1.101 dev enx00e04c681c5d src 192.168.1.50`이 나오면 된다.
 
-### 2-2. 브리지 실행 (터미널 1)
+### 2-2. 착용과 촉각 확인 (착용할 때마다)
+
+캘리브레이션은 장갑을 벗었다 껴도 유지된다. 다시 하지 않고, 착용할 때마다 아래만 확인한다.
+
+1. 손바닥 부위를 잡고 끼워 손에 밀착한다. 매번 같은 방식으로 끼운다(손끝 EMF 모듈이 손가락 끝에 오는 위치가 바뀌지 않게). 금속에서 3 cm 이상 떨어진다.
+2. 장갑 전원을 넣었으면 2~3초 기다린다(IMU 안정화, 설명서).
+3. 브리지를 끈 상태에서 촉각을 10초쯤 본다. `q`로 종료한다.
+
+```bash
+source /opt/ros/humble/setup.bash && cd ~/ros2_ws/src/wuji_ros/third_party/wuji-sdk/examples/python/wuji_glove && python3.10 8.tactile_contact_view.py
+```
+
+- 손을 편 채 아무것도 안 만질 때 `#`이 거의 없고, 손가락으로 누른 곳만 `#`이 뜨면 된다.
+- 안 만졌는데 `#`이 많거나 눌러도 안 뜨면 화면에서 `+`/`-`로 민감도(0.5~3.0)를 조정한다. 그래도 안 되면 촉각 캘리브레이션(`7.tactile_calibration.py`)을 다시 한다. 촉각 판정은 안 만질 때의 압력이 기준이라, 착용이 더 조이거나 헐거워지면 기준이 바뀔 수 있다.
+
+### 2-3. 브리지 실행 (터미널 1)
 
 ```bash
 cd ~/ros2_ws/src/wuji_ros && git pull && bash scripts/shells/glove_bridge.sh
@@ -112,7 +129,7 @@ cd ~/ros2_ws/src/wuji_ros && git pull && bash scripts/shells/glove_bridge.sh
 - `No devices found`면 주소로 바로 연결한다: `bash scripts/shells/glove_bridge.sh --address 192.168.1.101:50001`
 - 종료는 Ctrl+C.
 
-### 2-3. 토픽 확인 (터미널 2)
+### 2-4. 토픽 확인 (터미널 2)
 
 ```bash
 source /opt/ros/humble/setup.bash && ros2 topic hz /wuji_glove/right/hand_skeleton
@@ -124,7 +141,7 @@ source /opt/ros/humble/setup.bash && ros2 topic echo --once --full-length /wuji_
 - `hand_skeleton`은 약 120 Hz여야 한다.
 - `info`에서 `sdk_user_is_default: false`(캘리브레이션한 사용자), `unavailable_streams`(손가락 IMU 10개뿐), `urdf_source`를 확인한다.
 
-### 2-4. 녹화 (터미널 2)
+### 2-5. 녹화 (터미널 2)
 
 ```bash
 cd ~/ros2_ws/src/wuji_ros && bash scripts/shells/record_glove.sh subj01_take01
@@ -135,7 +152,7 @@ cd ~/ros2_ws/src/wuji_ros && bash scripts/shells/record_glove.sh subj01_take01
 - 브리지를 먼저 띄운다. `info`와 `/tf_static`은 latched라서 녹화를 나중에 시작해도 bag에 들어간다.
 - 종료는 Ctrl+C. `Recording stopped`가 나올 때까지 기다린다.
 
-### 2-5. bag 확인
+### 2-6. bag 확인
 
 ```bash
 source /opt/ros/humble/setup.bash && ros2 bag info data/bags/subj01_take01
