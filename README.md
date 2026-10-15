@@ -11,7 +11,8 @@ Wuji Glove + 4뷰 RealSense RGB-D + OptiTrack(물체) 녹화에서 오른손의 
 | 경로 | 내용 |
 |---|---|
 | `plan.md` | 목표, 마일스톤, 완료 조건, 결정 사항 |
-| `docs/` | 구조(`ARCHITECTURE.md`), 녹화 절차(`RECORDING.md`), 미해결 항목(`TODO.md`), 실험 기록(`experiments/`) |
+| `RECORDING.md` | 녹화 PC 운영 절차 (설치, 네트워크, 캘리브레이션, 녹화, 문제 해결) |
+| `docs/` | 구조(`ARCHITECTURE.md`), 미해결 항목(`TODO.md`), 실험 기록(`experiments/`) |
 | `calibration/<name>/` | 리그 캘리브 파일 (커밋). 현재 `20260824_v2` |
 | `wuji_ros/` | 파이썬 패키지. 현재 `bridge/`(glove → ROS2) |
 | `scripts/` | entrypoint. 현재 `glove_bridge.py`, 녹화 PC용 `shells/{setup_bridge,glove_bridge,record_glove}.sh` |
@@ -55,7 +56,7 @@ conda run --no-capture-output -n wuji_ros python -m unittest discover -s tests -
 
 ## 녹화 PC: glove 브리지
 
-설치, 네트워크, 캘리브레이션, 녹화, bag 확인, 문제 해결의 전체 절차는 [docs/RECORDING.md](docs/RECORDING.md)에 있다.
+설치, 네트워크, 캘리브레이션, 녹화, bag 확인, 문제 해결의 전체 절차는 [RECORDING.md](RECORDING.md)에 있다.
 wuji-sdk 휠이 glibc ≥ 2.34를 요구해서 브리지는 녹화 PC(Ubuntu 22.04 + ROS2 Humble)에서만 돈다. python은 `python3.10`(rclpy 빌드 버전)으로 실행한다.
 
 ```bash
