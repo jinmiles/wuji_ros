@@ -56,7 +56,7 @@ conda run --no-capture-output -n wuji_ros python -m unittest discover -s tests -
 
 ## 녹화 PC: glove 브리지
 
-설치, 네트워크, 캘리브레이션, 녹화, bag 확인, 문제 해결의 전체 절차는 [RECORDING.md](RECORDING.md)에 있다.
+녹화 PC 명령어(설치, 네트워크, 캘리브레이션, 녹화, bag 확인)는 [RECORDING.md](RECORDING.md)에 있다.
 wuji-sdk 휠이 glibc ≥ 2.34를 요구해서 브리지는 녹화 PC(Ubuntu 22.04 + ROS2 Humble)에서만 돈다. python은 `python3.10`(rclpy 빌드 버전)으로 실행한다.
 
 ```bash
