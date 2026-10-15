@@ -51,6 +51,8 @@ TACTILE_ZONE_STREAMS = tuple(f"tactile_zones/{zone}" for zone in convert.TACTILE
 # Streams that should produce frames once connected; tf_static is checked through info.
 EXPECTED_STREAMS = ("emf_poses", "tip_poses", "hand_skeleton", "hand_joint_angles", *IMU_STREAMS,
                     *TACTILE_GRID_STREAMS, "tactile_zones", "tactile_point_cloud", "tf")
+# Recording stops if one of these cannot be subscribed; the others are skipped when absent.
+REQUIRED_STREAMS = ("emf_poses", "hand_skeleton", "hand_joint_angles", "imu_raw/palm", "imu_data/palm", "tf_static")
 FIRST_FRAME_WAIT_S = 5.0
 
 
@@ -123,6 +125,7 @@ class GloveBridge(Node):
         self._failure: Optional[str] = None
         self._last_emf_ns: Optional[int] = None
         self._sdk_subs: List[Any] = []
+        self._unavailable: List[str] = []
         self._started_ns: Optional[int] = None
         self._silence_checked = False
         self.create_timer(0.2, self._check_health)
@@ -131,25 +134,35 @@ class GloveBridge(Node):
     # SDK callbacks run on the SDK's background threads; rclpy publishers accept that.
     def start(self) -> None:
         glove = self._glove
-        on_error = self._on_sdk_error
         manager = SdkManager.instance()
         self._started_ns = time.monotonic_ns()
-        self._sdk_subs = [
-            glove.emf_poses().subscribe_with_callback(self._on_emf_poses, on_error),
-            glove.tip_poses().subscribe_with_callback(self._on_tip_poses, on_error),
-            glove.hand_skeleton().subscribe_with_callback(self._on_hand_skeleton, on_error),
-            glove.hand_joint_angles().subscribe_with_callback(self._on_hand_joint_angles, on_error),
-            *(getattr(glove, f"imu_{link}")().subscribe_with_callback(
-                partial(self._on_imu, f"imu_raw/{link}"), on_error) for link in convert.IMU_LINKS),
-            *(getattr(glove, f"imu_data_{link}")().subscribe_with_callback(
-                partial(self._on_imu, f"imu_data/{link}"), on_error) for link in convert.IMU_LINKS),
-            *(getattr(glove, stream)().subscribe_with_callback(
-                partial(self._on_tactile_grid, stream), on_error) for stream in TACTILE_GRID_STREAMS),
-            glove.tactile_zones().subscribe_with_callback(self._on_tactile_zones, on_error),
-            glove.tactile_point_cloud().subscribe_with_callback(self._on_tactile_point_cloud, on_error),
-            manager.tf().subscribe_with_callback(self._on_tf, on_error),
-            manager.tf_static().subscribe_with_callback(self._on_tf_static, on_error),
+        streams = [
+            ("emf_poses", glove.emf_poses, self._on_emf_poses),
+            ("tip_poses", glove.tip_poses, self._on_tip_poses),
+            ("hand_skeleton", glove.hand_skeleton, self._on_hand_skeleton),
+            ("hand_joint_angles", glove.hand_joint_angles, self._on_hand_joint_angles),
+            *((f"imu_raw/{link}", getattr(glove, f"imu_{link}"), partial(self._on_imu, f"imu_raw/{link}"))
+              for link in convert.IMU_LINKS),
+            *((f"imu_data/{link}", getattr(glove, f"imu_data_{link}"), partial(self._on_imu, f"imu_data/{link}"))
+              for link in convert.IMU_LINKS),
+            *((stream, getattr(glove, stream), partial(self._on_tactile_grid, stream))
+              for stream in TACTILE_GRID_STREAMS),
+            ("tactile_zones", glove.tactile_zones, self._on_tactile_zones),
+            ("tactile_point_cloud", glove.tactile_point_cloud, self._on_tactile_point_cloud),
+            ("tf", manager.tf, self._on_tf),
+            ("tf_static", manager.tf_static, self._on_tf_static),
         ]
+        for stream, resource, callback in streams:
+            try:
+                self._sdk_subs.append(resource().subscribe_with_callback(callback, self._on_sdk_error))
+            except WujiException as exc:
+                # The SDK exposes every Wuji Glove stream, but a given glove need not carry
+                # the sensor (e.g. no finger IMUs: "Path not found: imu_raw/thumb").
+                if stream in REQUIRED_STREAMS:
+                    raise BridgeError(f"cannot subscribe to {stream}: {exc}") from exc
+                self._unavailable.append(stream)
+                self.get_logger().warning(f"{stream}: not offered by this glove, skipped ({exc})")
+        self._update_info(unavailable_streams=self._unavailable)
         self.get_logger().info(f"streaming to {TOPIC_NS}/*")
 
     def stop(self) -> None:
@@ -169,7 +182,8 @@ class GloveBridge(Node):
         if (not self._silence_checked and started is not None
                 and (time.monotonic_ns() - started) * 1e-9 > FIRST_FRAME_WAIT_S):
             self._silence_checked = True
-            silent = [stream for stream in EXPECTED_STREAMS if stream not in self._logged_streams]
+            silent = [stream for stream in EXPECTED_STREAMS
+                      if stream not in self._logged_streams and stream not in self._unavailable]
             # Not fatal: tactile_binary / tactile_residual need a tactile calibration.
             if silent:
                 self.get_logger().warning(f"no frame after {FIRST_FRAME_WAIT_S} s from: {silent}")

@@ -125,6 +125,7 @@ bash scripts/shells/record_glove.sh <name>         # 터미널 2. data/bags/<nam
 - 발행 토픽: SDK의 Wuji Glove 스트림 전부(`plan.md` M1 표).
   - 손 자세: `/wuji_glove/right/{emf_poses, tip_poses, hand_skeleton, hand_joint_angles}`
   - IMU: `/wuji_glove/right/imu_raw/{palm,thumb,index,middle,ring,pinky}`, `/wuji_glove/right/imu_data/{...}`
+    - 현재 장갑(`WG1KA06260805538`)은 손등 IMU만 있다(설명서 사양: 6축 IMU 1개). 손가락 IMU는 `Path not found`로 건너뛰고 `info.unavailable_streams`에 남는다.
   - 촉각: `/wuji_glove/right/{tactile, tactile_binary, tactile_residual}`(24×31 `32FC1` 이미지), `/wuji_glove/right/tactile_zones/{palm,...,pinky}`, `/wuji_glove/right/tactile_point_cloud`
   - 변환: `/wuji_glove/right/tf`(IMU 기반 `waist → r_wrist`, 전역 `/tf`에는 넣지 않음), `/tf_static`
   - 메타: `/wuji_glove/right/info`

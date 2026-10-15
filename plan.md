@@ -152,7 +152,7 @@ EMF:                        p_wrist(t) = T_wrist_from_emftx · p_emftx(t)     # 
 | `/wuji_glove/right/tip_poses` | `sensor_msgs/PointCloud2` | 5점, 필드는 `emf_poses`와 같음, `frame_id=r_wrist` (IK→FK 파생값) |
 | `/wuji_glove/right/hand_skeleton` | `sensor_msgs/PointCloud2` | 21점(MediaPipe 순서), 필드 `x,y,z,confidence`, `frame_id=r_wrist` |
 | `/wuji_glove/right/hand_joint_angles` | `sensor_msgs/JointState` | 21 DoF, rad |
-| `/wuji_glove/right/imu_raw/{palm,thumb,index,middle,ring,pinky}` | `sensor_msgs/Imu` | 원시 각속도·가속도 (시간 동기 검증 + offline pipeline 입력) |
+| `/wuji_glove/right/imu_raw/{palm,thumb,index,middle,ring,pinky}` | `sensor_msgs/Imu` | 원시 각속도·가속도 (시간 동기 검증 + offline pipeline 입력) 손가락 IMU는 장갑에 없으면 건너뛴다(2026-10-15 현재 장갑은 palm만) |
 | `/wuji_glove/right/imu_data/{palm,thumb,index,middle,ring,pinky}` | `sensor_msgs/Imu` | 융합 자세 (기울기 검증용, yaw 불사용) |
 | `/wuji_glove/right/{tactile, tactile_binary, tactile_residual}` | `sensor_msgs/Image` `32FC1` | 24×31 row-major, `-1.0` = 무효 taxel. 각각 보정 압력, 접촉 여부(1/0), 접촉 잔차 |
 | `/wuji_glove/right/tactile_zones/{palm,thumb,index,middle,ring,pinky}` | `sensor_msgs/Image` `32FC1` | 영역별 값, 1×n (n은 `info.tactile_zone_sizes`) |
