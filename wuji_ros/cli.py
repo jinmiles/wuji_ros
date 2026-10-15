@@ -57,6 +57,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("fit4", help="V1 over all views in world (needs the session's calibration)")
     _session_args(p)
     p.add_argument("--glove-thickness-mm", type=float, default=0.0)
+    p.add_argument("--imu-weight", type=float, default=100.0,
+                   help="weight of the glove IMU tilt term (0 = image-only fit; a palm/back flip costs 2x this)")
 
     p = sub.add_parser("calib", help="check the assigned calibration: table planes + per-camera hand agreement")
     p.add_argument("--session", required=True)
@@ -92,7 +94,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         run(args.session, glove_thickness_m=args.glove_thickness_mm / 1000.0, force=args.force)
     elif args.command == "fit4":
         from .handfit import run_world
-        run_world(args.session, glove_thickness_m=args.glove_thickness_mm / 1000.0, force=args.force)
+        run_world(args.session, glove_thickness_m=args.glove_thickness_mm / 1000.0, imu_weight=args.imu_weight,
+                  force=args.force)
     elif args.command == "calib":
         from .calibcheck import run
         run(args.session)

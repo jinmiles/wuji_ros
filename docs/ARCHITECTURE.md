@@ -34,7 +34,7 @@ extract → segment(table, depth+RGB box) → keypoints(HaMeR, 삼각측량으�
 | `wuji_ros/segment.py` | 테이블 평면·영역, depth + RGB 손 후보와 1차 박스, 삼각측량 골격 주변 손 점군 `hand_points` (구현됨) |
 | `wuji_ros/mano.py` | MANO forward, OpenPose-21 관절 순서 (구현됨) |
 | `wuji_ros/glovefit.py` | G1 (구현됨) |
-| `wuji_ros/handfit.py` | V1 카메라별(`fit`)과 4뷰 world(`fit4`) (구현됨). β는 현재 G1에서 푼다. V2는 아직 없음 |
+| `wuji_ros/handfit.py` | V1 카메라별(`fit`)과 4뷰 world(`fit4`) (구현됨). `fit4`는 glove 융합 IMU 기울기 항(기본 가중치 100)과 2D 라벨 거울 가설(손바닥/손등 뒤집힘 대응)을 쓴다. β는 현재 G1에서 푼다. V2는 아직 없음 |
 | `wuji_ros/viz.py` | 카메라 overlay(손 mesh + MANO 골격만), 촉각 맵 별도 시퀀스, 각각 H.264(yuv444p) mp4 + gif (구현됨) |
 | `wuji_ros/evaluate.py` | 일치도 지표, 프레임별 라벨 |
 | `wuji_ros/cli.py`, `scripts/run.py` | 분석 entrypoint, 단계별 subcommand, `--force` (구현됨) |
@@ -50,7 +50,8 @@ data/<session>/
   object/NNNNNN.npz                  # 물체 rigid body pose + 마커 (마커 토픽에 메시지가 없으면 NaN)
   glove/NNNNNN.npz                   # skeleton_wrist, skeleton_confidence, emf_poses, tip_poses, joint_angles, accel_wrist, gravity_wrist,
                                      # tactile / tactile_binary / tactile_residual (24,31), tactile_zone_<zone> (n,),
-                                     # tactile_points (526,3) r_wrist + tactile_pressure (526,). 키 설명은 bagio.py
+                                     # tactile_points (526,3) r_wrist + tactile_pressure (526,),
+                                     # R_waist_from_wrist (3,3) + gravity_wrist_fused (3,) (SDK 융합 IMU 자세). 키 설명은 bagio.py
   metadata.csv                       # frame_id별 스트림 timestamp와 dt
   manifest.json                      # bag, 캘리브 이름, SDK 정보, 장갑 두께, 추출 설정
 output/<session>/<stage>/...         # 단계별 결과, 재실행 시 재사용, --force로 재생성
@@ -106,6 +107,7 @@ output/<session>/<stage>/...         # 단계별 결과, 재실행 시 재사용
 - `r_wrist` 축: X 요측, Z 근위(손목→팔꿈치), Y = Z × X (오른손은 손바닥 쪽).
 - `emf_poses`: `r_hand_emf_tx` 프레임. `T_wrist_from_emftx`는 `tf_static`이다(회전 포함, 2026-10-15 실측 약 13.6°). bag의 `/tf_static`에서 읽는다.
 - 촉각 taxel(`tactile_point_cloud`)은 `r_wrist` 프레임이다. `fit4`의 `T_world_from_wrist`로 world에 옮긴다. `1015-5`에서 taxel과 G1 MANO 표면의 거리 중앙값은 5.5 mm다.
+- glove 중력은 SDK 융합 자세 `/wuji_glove/right/tf`(`waist → r_wrist`, waist z-up)에서 `R_waist_from_wrist^T (0,0,−1)`로 구한다(roll·pitch만 의미가 있다). `imu_raw` 가속도계는 정지할 때만 중력이다.
 - palm IMU 축은 손목 축과 다르다: `T_wrist_from_palmimu`의 회전이 x축 90°다(2026-10-15 실측). roll·pitch만 신뢰하고 yaw는 드리프트한다.
 
 ## 시간 규약

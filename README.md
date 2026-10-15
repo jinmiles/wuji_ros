@@ -112,7 +112,7 @@ conda run --no-capture-output -n wuji_ros python scripts/run.py segment   --sess
 conda run --no-capture-output -n wuji_ros python scripts/run.py keypoints --session $S
 conda run --no-capture-output -n wuji_ros python scripts/run.py glovefit  --session $S
 conda run --no-capture-output -n wuji_ros python scripts/run.py fit       --session $S   # 카메라별 (calib 비교용)
-conda run --no-capture-output -n wuji_ros python scripts/run.py fit4      --session $S   # 4뷰 world (rig.SESSION_CALIBRATION 필요)
+conda run --no-capture-output -n wuji_ros python scripts/run.py fit4      --session $S   # 4뷰 world (rig.SESSION_CALIBRATION 필요). --imu-weight 0 = 영상만
 conda run --no-capture-output -n wuji_ros python scripts/run.py calib     --session $S
 conda run --no-capture-output -n wuji_ros python scripts/run.py overlay   --session $S   # output/$S/overlay.{mp4,gif}
 conda run --no-capture-output -n wuji_ros python scripts/run.py tactile   --session $S   # output/$S/tactile.{mp4,gif}
@@ -125,7 +125,7 @@ conda run --no-capture-output -n wuji_ros python scripts/run.py tactile   --sess
 | `keypoints` | `keypoints/<camera>/NNNNNN.npz` HaMeR 2D, 카메라 좌표계 회전, hand_pose, betas, 박스 출처; `keypoints/triangulated/NNNNNN.npz` 3D 관절 |
 | `glovefit` | `glovefit/NNNNNN.npz` G1 hand_pose, β, `T_wrist_from_mano`, 잔차 |
 | `fit` | `fit/<camera>/NNNNNN.npz` 카메라 좌표계 V1 |
-| `fit4` | `fit4/NNNNNN.npz` world V1 |
+| `fit4` | `fit4/NNNNNN.npz` world V1 (glove IMU 기울기 항 + 2D 라벨 거울 가설로 손바닥/손등 뒤집힘 처리) |
 | `calib` | `calib/report.json` 테이블 평면, 카메라별 손목 일치 |
 | `tactile` | `tactile/NNNNNN.jpg`, `tactile.mp4`, `tactile.gif`. 24×31 촉각 맵(binary 접촉 표시)과 영역별 최댓값 |
 | `overlay` | `overlay/NNNNNN.jpg`, `overlay.mp4`(H.264 yuv444p), `overlay.gif`. 카메라 위에는 손 mesh와 MANO 골격만 그린다. 재생은 추출 간격과 무관한 고정 `--fps`(프레임 순서) |
