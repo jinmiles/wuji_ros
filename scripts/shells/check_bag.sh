@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Recording PC: per-topic message count and rate of data/bags/<name>, empty topics flagged.
+# Recording PC: per-topic message count and rate of data/bags/<name>, empty topics flagged,
+# then the glove delay / stamp order / unit check (wuji_ros.bridge.bagcheck).
 # Usage: check_bag.sh <name>
 set -eo pipefail
 cd "$(dirname "$0")/../.."
@@ -15,3 +16,6 @@ echo "$info" | sed -n 's/.*Topic: \([^ ]*\) | Type: \([^ ]*\) | Count: \([0-9]*\
                          printf "%-55s %9d %9.1f  %s%s\n", $1, $2, hz, $3, flag}'
 echo
 du -sh "data/bags/${name}"
+echo
+echo "== glove delay (bag receive time - header.stamp), stamp order, units"
+python3.10 -m wuji_ros.bridge.bagcheck "data/bags/${name}"
