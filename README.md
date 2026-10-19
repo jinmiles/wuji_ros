@@ -5,7 +5,7 @@ Wuji Glove + 4뷰 RealSense RGB-D + OptiTrack(물체) 녹화에서 오른손의 
 계획과 결정 사항은 [plan.md](plan.md), 구조와 좌표 규약은 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)에 있다.
 
 현재 상태:
-- M1(glove 브리지): 녹화 PC에서 실행·녹화 확인(2026-10-15). stamp 단조성·지연·단위 확인은 남음.
+- M1(glove 브리지): 수용 기준 확인(2026-10-16, `1015-5`: 120 Hz, stamp 역행 0, delay 중앙값 약 2 ms, 단위 m). 수치는 `plan.md` M1.
 - 분석: `extract → segment → keypoints → glovefit → fit / fit4 → calib → overlay / tactile`가 첫 세션 `1015-5`에서 돈다(2026-10-16). 결과는 `docs/experiments/001_glove_hand_pose/experiments.md`에 있다.
 
 ## 구성

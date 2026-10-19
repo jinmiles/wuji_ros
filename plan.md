@@ -175,6 +175,11 @@ EMF:                        p_wrist(t) = T_wrist_from_emftx · p_emftx(t)     # 
 - 구현(2026-09-18): `wuji_ros/bridge/convert.py`(순수 변환), `wuji_ros/bridge/node.py`, `scripts/glove_bridge.py`, `requirements-bridge.txt`.
   변환 계약 테스트는 `tests/test_bridge_convert.py`. 실제 장갑·ROS 환경에서의 실행은 녹화 PC에서 확인해야 한다.
 - 수용 기준: bag에서 `hand_skeleton` ≈ 120 Hz, stamp 단조 증가, `|stamp − recv|` 분포 기록, 단위 m 확인.
+- 수용 결과(2026-10-16, `1015-5_recovered`, 52.9 s, delay = bag 수신 시각 − `header.stamp`):
+  - 장갑 120 Hz 토픽 15개: 120.0 Hz, delay 중앙값 1.5~2.4 ms, p99 ≤ 7.6 ms, 최대 15.8 ms, 최소 ≥ 0.5 ms. stamp 역행 0, 최대 간격 8.4~8.8 ms(프레임 누락 없음).
+  - palm IMU(`imu_raw`/`imu_data`)와 IMU `tf`: 736~752 Hz, delay 중앙값 12.6~12.9 ms, 최대 30.7 ms. stamp 역행 0.
+  - 단위: `hand_skeleton` 첫 frame 손목→중지 끝 0.182 m, 손목→검지 MCP 0.097 m → m 단위.
+  - 참고: 카메라 color/aligned depth는 22.5~28.0 Hz(목표 30), delay 중앙값 41~51 ms, 최대 간격 100~301 ms. `/RigidBody/pose`는 delay 중앙값 0.1 ms라 stamp가 수신 시각으로 찍힌 것으로 보인다(캡처 시각 아님). E001에서 다룬다.
 
 ### M2 — 실험 세팅·녹화
 - 손에는 마커를 붙이지 않는다. OptiTrack은 물체만 추적한다.
