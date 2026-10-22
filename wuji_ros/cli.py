@@ -2,7 +2,8 @@
 
 Stages and their environments (README "환경"):
     extract    bag -> data/<session>/                    wuji_ros
-    segment    table + hand boxes from depth and RGB     wuji_ros
+    import     pre-sampled folder -> data/<session>/     wuji_ros
+    segment   table + hand boxes from depth and RGB     wuji_ros
     keypoints  HaMeR per view, re-boxed by triangulation wuji_ros
     glovefit   G1: glove skeleton -> MANO (r_wrist)      wuji_ros
     fit        V1 per camera: wrist 6D from HaMeR+depth  wuji_ros
@@ -36,6 +37,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--session", default=None, help="default: the bag directory name")
     p.add_argument("--every", type=float, default=DEFAULT_EVERY_S,
                    help="seconds between extracted master frames")
+    p.add_argument("--start", type=float, default=0.0, help="seconds after the first master frame")
+    p.add_argument("--end", type=float, default=None, help="seconds after the first master frame")
+    p.add_argument("--force", action="store_true")
+
+    p = sub.add_parser("import", help="pre-sampled recording folder (image_metadata.csv, camera*/, wuji/, mocap/) "
+                                      "-> data/<session>/ on the camera1 color clock")
+    p.add_argument("src", type=Path, help="recording folder")
+    p.add_argument("--camera-config", type=Path, required=True,
+                   help="yaml whose cameras[] give name, width, height and intrinsics fx, fy, cx, cy")
+    p.add_argument("--session", default=None, help="default: the folder name")
+    p.add_argument("--every", type=float, default=DEFAULT_EVERY_S,
+                   help="seconds between imported master frames (0 = every frame)")
     p.add_argument("--start", type=float, default=0.0, help="seconds after the first master frame")
     p.add_argument("--end", type=float, default=None, help="seconds after the first master frame")
     p.add_argument("--force", action="store_true")
@@ -80,6 +93,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         from .bagio import extract
         extract(args.bag, session=args.session, every_s=args.every, start_s=args.start,
                 end_s=args.end, force=args.force)
+    elif args.command == "import":
+        from .bagio import import_dir
+        import_dir(args.src, args.camera_config, session=args.session, every_s=args.every, start_s=args.start,
+                   end_s=args.end, force=args.force)
     elif args.command == "segment":
         from .segment import run
         run(args.session, force=args.force)

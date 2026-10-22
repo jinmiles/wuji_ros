@@ -7,6 +7,7 @@ Wuji Glove + 4뷰 RealSense RGB-D + OptiTrack(물체) 녹화에서 오른손의 
 현재 상태:
 - M1(glove 브리지): 수용 기준 확인(2026-10-16, `1015-5`: 120 Hz, stamp 역행 0, delay 중앙값 약 2 ms, 단위 m). 수치는 `plan.md` M1.
 - 분석: `extract → segment → keypoints → glovefit → fit / fit4 → calib → overlay / tactile`가 첫 세션 `1015-5`에서 돈다(2026-10-16). 결과는 `docs/experiments/001_glove_hand_pose/experiments.md`에 있다.
+- 2026-10-22 물체 파지 세션(`import`로 들임)에서도 끝까지 돈다(E008). 다만 물체를 쥐고 들어 올린 구간의 손 fit은 육안으로 틀린 프레임이 있다(`docs/TODO.md`).
 
 ## 구성
 
@@ -98,6 +99,21 @@ ln -sfn /mnt/MV-SAM3D/submodules/Dyn-HaMR/_DATA/data/mano_mean_params.npz assets
 ```
 
 `hamer.ckpt`는 위치만 Dyn-HaMR 폴더일 뿐 HaMeR 공식 checkpoint다. Dyn-HaMR 코드는 쓰지 않는다.
+
+2026-10-22 분석 서버(`/home/user/wj/wuji_ros`)에는 위 경로가 없다.
+- HaMeR: upstream `hamer_demo_data.tar.gz`를 받아 필요한 것만 풀었다.
+- MANO: 같은 파일(md5 `fd5a9d35…`)이 다른 프로젝트에 있어서 그것을 가리킨다.
+
+```bash
+cd /home/user/wj/hamer_data   # wget https://www.cs.utexas.edu/~pavlakos/hamer/data/hamer_demo_data.tar.gz
+tar --warning=no-unknown-keyword --exclude=".*" -xzf hamer_demo_data.tar.gz _DATA/hamer_ckpts _DATA/data/mano_mean_params.npz
+cd /home/user/wj/wuji_ros
+mkdir -p assets/hamer/data
+ln -sfn /home/user/wj/BIGS-v2/misc/body_models/mano assets/mano
+ln -sfn /home/user/wj/BIGS-v2/misc/body_models/mano assets/hamer/data/mano
+ln -sfn /home/user/wj/hamer_data/_DATA/hamer_ckpts assets/hamer/hamer_ckpts
+ln -sfn /home/user/wj/hamer_data/_DATA/data/mano_mean_params.npz assets/hamer/data/mano_mean_params.npz
+```
 `MANO_RIGHT.pkl`은 md5 `fd5a9d35…`다. 예전 위치 `/mnt/EvalAI/assets/mano`는 2026-10-16 현재 마운트되어 있지 않다.
 
 ## 분석 파이프라인
@@ -118,9 +134,21 @@ conda run --no-capture-output -n wuji_ros python scripts/run.py overlay   --sess
 conda run --no-capture-output -n wuji_ros python scripts/run.py tactile   --session $S   # output/$S/tactile.{mp4,gif}
 ```
 
+bag이 아니라 다른 수집기가 고정 주기로 이미 뽑아 둔 폴더(`image_metadata.csv`, `camera*/{color,depth}/`, `wuji/`, `mocap/`, `wuji_info.json`)는 `extract` 대신 `import`로 같은 레이아웃을 만든다.
+- 폴더에 camera_info가 없어서 intrinsics는 `--camera-config` yaml의 `cameras[].intrinsics`(fx, fy, cx, cy)에서 읽는다.
+- frame_id는 폴더 번호를 그대로 쓴다.
+- 폴더에는 스트림마다 틱당 한 샘플만 남아 있어 다시 매칭할 수 없다. 그래서 camera1 color 기준 허용오차(카메라 17 ms, glove·mocap 10 ms)를 넘는 스트림은 그 프레임에서 결측으로 둔다.
+
+```bash
+S=20261022_163051_mocap_mk4_wuji_fixed_rate
+conda run --no-capture-output -n wuji_ros python scripts/run.py import data/brl_mocap_cam_hand/$S \
+    --camera-config data/brl_mocap_cam_hand/config_rerun_object_mk4_wuji.yaml --every 0.5
+```
+
 | stage | 출력 (`output/<session>/`) |
 |---|---|
 | `extract` | `data/<session>/` (레이아웃은 `docs/ARCHITECTURE.md`) |
+| `import` | `data/<session>/` (`extract`와 같은 레이아웃, frame_id는 원본 폴더 번호) |
 | `segment` | `scene/table.npz` 테이블 평면·영역, `segment/NNNNNN.npz` 뷰별 1차 박스와 depth 손 후보 |
 | `keypoints` | `keypoints/<camera>/NNNNNN.npz` HaMeR 2D, 카메라 좌표계 회전, hand_pose, betas, 박스 출처; `keypoints/triangulated/NNNNNN.npz` 3D 관절 |
 | `glovefit` | `glovefit/NNNNNN.npz` G1 hand_pose, β, `T_wrist_from_mano`, 잔차 |

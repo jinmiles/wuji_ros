@@ -17,12 +17,19 @@ frame itself is kept (plan.md M3).
 The bag is read as SQLite directly, so a bag whose recorder died (empty
 metadata.yaml) works once `sqlite3 broken.db3 .recover | sqlite3 fixed.db3` has
 made its database readable.
+
+`import_dir` writes the same layout from a recording folder that another collector
+already sampled on its own fixed-rate host-clock grid (image_metadata.csv,
+camera{1..4}/{color,depth}/, wuji/, mocap/, wuji_info.json). Only one sample per
+stream and tick was kept there, so nothing can be re-matched: each stream is held
+against camera1 color with the same tolerances and left out when it misses them.
 """
 
 from __future__ import annotations
 
 import csv
 import json
+import shutil
 import sqlite3
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -357,6 +364,181 @@ def extract(bag_path: Path, session: Optional[str] = None, every_s: float = 0.5,
     return out
 
 
+# import_dir: the collector's wuji/*.npz name for each GLOVE_STREAMS stream (same SDK payloads)
+DIR_GLOVE_PREFIX = {
+    "skeleton": "hand_skeleton", "emf": "emf_poses", "tips": "tip_poses", "angles": "hand_joint_angles",
+    "imu": "imu_raw_palm", "imu_tf": "tf", "tactile": "tactile", "tactile_binary": "tactile_binary",
+    "tactile_residual": "tactile_residual", "tactile_cloud": "tactile_point_cloud",
+    **{f"tactile_zone_{z}": f"tactile_zones_{z}" for z in TACTILE_ZONES},
+}
+_POSE_FIELDS = ["x", "y", "z", "qx", "qy", "qz", "qw", "confidence"]
+DIR_GLOVE_LAYOUT = {"hand_skeleton_fields": ["x", "y", "z", "confidence"], "emf_poses_fields": _POSE_FIELDS,
+                    "tip_poses_fields": _POSE_FIELDS, "tactile_point_cloud_fields": ["x", "y", "z", "pressure"],
+                    "tf_frames": ["waist", "r_wrist"]}
+
+
+def _dir_glove(w: Dict[str, np.ndarray], key: str, R_wrist_from_imu: np.ndarray) -> Dict[str, np.ndarray]:
+    """One stream of a collector wuji/*.npz -> the glove npz keys extract() writes for it."""
+    p = DIR_GLOVE_PREFIX[key]
+    if key == "skeleton":
+        return {"skeleton_wrist": w[p][:, :3], "skeleton_confidence": w[p][:, 3]}
+    if key in ("emf", "tips"):
+        return {p: w[p]}
+    if key == "angles":
+        return {"joint_angles": w[p], "joint_names": w[f"{p}_names"]}
+    if key == "tactile_cloud":
+        return {"tactile_points": w[p][:, :3], "tactile_pressure": w[p][:, 3]}
+    if key == "imu_tf":
+        R = _quat_matrix(w["tf_rotation_xyzw"][0])
+        return {"R_waist_from_wrist": R, "gravity_wrist_fused": R.T @ np.array([0.0, 0.0, -1.0])}
+    if key == "imu":
+        acc = R_wrist_from_imu @ w[f"{p}_linear_acceleration"].astype(np.float64)
+        return {"accel_wrist": acc, "gravity_wrist": -acc / max(np.linalg.norm(acc), 1e-9)}
+    return {key: w[p].ravel() if key.startswith("tactile_zone_") else w[p]}
+
+
+def import_dir(src: Path, camera_config: Path, session: Optional[str] = None, every_s: float = 0.5,
+               start_s: float = 0.0, end_s: Optional[float] = None, force: bool = False) -> Path:
+    """Write data/<session>/ from a pre-sampled recording folder (module docstring); returns the session directory.
+
+    Frame ids stay the folder's, so data/<session>/ frame N is the folder's frame N.
+    Intrinsics come from `camera_config` (cameras[].intrinsics fx fy cx cy), since the
+    folder keeps no camera_info.
+    """
+    import yaml
+
+    src = Path(src)
+    session = session or src.name
+    out = session_dir(session)
+    if out.resolve() == src.resolve():
+        raise SystemExit(f"{src} is already data/{session}: pass another --session")
+    if (out / "metadata.csv").is_file() and not force:
+        LOGGER.info("%s exists, skipping (use --force to re-import)", out)
+        return out
+    cams = [c for c in CAMERAS if (src / c / "color").is_dir() and (src / c / "depth").is_dir()]
+    if MASTER_CAMERA not in cams:
+        raise SystemExit(f"{src}: no {MASTER_CAMERA} color + depth")
+    has_glove, has_object = (src / "wuji").is_dir(), (src / "mocap").is_dir()
+    with (src / "image_metadata.csv").open(newline="") as fh:
+        rows = sorted(csv.DictReader(fh), key=lambda r: int(r["frame_id"]))
+    cfg = {c["name"]: c for c in yaml.safe_load(Path(camera_config).read_text())["cameras"]}
+    info = json.loads((src / "wuji_info.json").read_text()) if has_glove else None
+    tf_static = {f"{t['parent']}->{t['child']}": {k: t[k] for k in ("parent", "child", "translation", "rotation_xyzw")}
+                 for t in (info or {}).get("tf_static", [])}
+    imu_tf = tf_static.get("r_wrist->r_palm_imu_link")
+    R_wrist_from_imu = _quat_matrix(imu_tf["rotation_xyzw"]) if imu_tf else None
+
+    def stamp(r: Dict[str, str], key: str) -> Optional[float]:
+        return float(r[key]) if r.get(key) else None
+
+    master = [(int(r["frame_id"]), stamp(r, f"{MASTER_CAMERA}_color_timestamp"), r) for r in rows]
+    master = [m for m in master if m[1] is not None]
+    t0 = master[0][1]
+    t_end = t0 + end_s if end_s is not None else master[-1][1]
+    picks, next_t, last = [], t0 + start_s, -np.inf
+    for fid, t, r in master:
+        if next_t <= t <= t_end and t > last:  # t == last: the tick reused camera1's previous frame
+            picks.append((fid, t, r))
+            next_t, last = t + every_s, t
+
+    for cam in cams:
+        for kind in ("color", "depth"):
+            (out / cam / kind).mkdir(parents=True, exist_ok=True)
+        c = cfg[cam]
+        k = c["intrinsics"]
+        (out / cam / "intrinsics.json").write_text(json.dumps({
+            "width": int(c["width"]), "height": int(c["height"]),
+            "K": [[float(k["fx"]), 0.0, float(k["cx"])], [0.0, float(k["fy"]), float(k["cy"])], [0.0, 0.0, 1.0]],
+            "source": f"{camera_config}: cameras[{cam}].intrinsics (the recording keeps no camera_info)"},
+            indent=2) + "\n")
+    if has_glove:
+        (out / "glove").mkdir(exist_ok=True)
+    if has_object:
+        (out / "object").mkdir(exist_ok=True)
+
+    rows_out, missing, layout_checked = [], {}, False
+    for fid, t, r in picks:
+        name = frame_name(fid)
+        row: Dict[str, object] = {"frame_id": fid, "master_stamp": f"{t:.6f}", "source_anchor_stamp": r["anchor_timestamp"]}
+        for cam in cams:
+            ref = t
+            for kind in ("color", "depth"):
+                # depth is held against its own camera's colour frame, colour against the master
+                key = f"{cam}_{kind}"
+                st, p = stamp(r, f"{key}_timestamp"), src / cam / kind / f"{name}.png"
+                if st is None or abs(st - ref) > CAMERA_TOL_S or not p.is_file():
+                    row[f"{key}_stamp"], row[f"{key}_dt_ms"] = "", ""
+                    missing[key] = missing.get(key, 0) + 1
+                    continue
+                shutil.copyfile(p, out / cam / kind / f"{name}.png")
+                row[f"{key}_stamp"], row[f"{key}_dt_ms"] = f"{st:.6f}", f"{(st - t) * 1e3:.2f}"
+                if kind == "color":
+                    ref = st
+
+        if has_glove:
+            wp = src / "wuji" / f"{name}.npz"
+            w = dict(np.load(wp)) if wp.is_file() else {}
+            if w and not layout_checked:
+                for k, v in DIR_GLOVE_LAYOUT.items():
+                    if k in w and w[k].ravel().tolist() != v:
+                        raise ValueError(f"{wp}: {k} = {w[k].ravel().tolist()}, expected {v}")
+                layout_checked = True
+            g: Dict[str, np.ndarray] = {}
+            for key, p in DIR_GLOVE_PREFIX.items():
+                st = float(w[f"{p}_timestamp"]) if f"{p}_timestamp" in w else None
+                if st is None or abs(st - t) > STREAM_TOL_S or (key == "imu" and R_wrist_from_imu is None):
+                    row[f"glove_{key}_stamp"], row[f"glove_{key}_dt_ms"] = "", ""
+                    missing[f"glove_{key}"] = missing.get(f"glove_{key}", 0) + 1
+                    continue
+                row[f"glove_{key}_stamp"], row[f"glove_{key}_dt_ms"] = f"{st:.6f}", f"{(st - t) * 1e3:.2f}"
+                g.update(_dir_glove(w, key, R_wrist_from_imu))
+                g[f"{key}_stamp"] = np.float64(st)
+            if g:
+                np.savez(out / "glove" / f"{name}.npz", **g)
+
+        if has_object:
+            mp, st = src / "mocap" / f"{name}.npz", stamp(r, "mocap_timestamp")
+            if st is None or abs(st - t) > STREAM_TOL_S or not mp.is_file():
+                row["object_stamp"], row["object_dt_ms"] = "", ""
+                missing["object"] = missing.get("object", 0) + 1
+            else:
+                m = np.load(mp)
+                row["object_stamp"], row["object_dt_ms"] = f"{st:.6f}", f"{(st - t) * 1e3:.2f}"
+                # `orientation` is x,y,z,w: with that order the markers stay rigid in the body
+                # frame (0.14 mm median on 20261022_163051; w,x,y,z gives 4.7 mm, max 60 mm)
+                np.savez(out / "object" / f"{name}.npz", position=m["position"].astype(np.float64),
+                         orientation_xyzw=m["orientation"].astype(np.float64), marker_names=m["marker_names"],
+                         marker_positions=m["marker_positions"].astype(np.float64).reshape(-1, 3))
+        rows_out.append(row)
+
+    fields = list(dict.fromkeys(k for r in rows_out for k in r))
+    with (out / "metadata.csv").open("w", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows_out)
+
+    color_dt = [abs(float(r[f"{c}_color_dt_ms"])) for r in rows_out for c in cams
+                if c != MASTER_CAMERA and r.get(f"{c}_color_dt_ms") not in ("", None)]
+    manifest = {
+        "source": str(src), "session": session, "master": f"{MASTER_CAMERA} color stamp (image_metadata.csv)",
+        "frame_ids": "the source folder's", "every_s": every_s, "start_s": start_s, "end_s": end_s,
+        "camera_tol_ms": CAMERA_TOL_S * 1e3, "stream_tol_ms": STREAM_TOL_S * 1e3,
+        "first_master_stamp": t0, "master_span_s": float(master[-1][1] - t0),
+        "frames": len(rows_out), "missing": missing, "cameras": cams,
+        "camera_color_dt_ms": {"median": float(np.median(color_dt)), "max": float(np.max(color_dt))} if color_dt else None,
+        "intrinsics": str(camera_config),
+        "source_capture_config": (json.loads((src / "capture_config.json").read_text())
+                                  if (src / "capture_config.json").is_file() else None),
+        "tf_static": tf_static, "glove_info": info,
+        "calibration": None,  # set by the calib stage once a calibration is assigned
+    }
+    (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    LOGGER.info("%s: %d frames, missing %s, other cameras vs master median %.1f ms",
+                out, len(rows_out), missing or "none",
+                manifest["camera_color_dt_ms"]["median"] if color_dt else float("nan"))
+    return out
+
+
 class Session:
     """Reader for data/<session>/."""
 
@@ -364,7 +546,7 @@ class Session:
         self.name = name
         self.root = session_dir(name)
         if not (self.root / "metadata.csv").is_file():
-            raise FileNotFoundError(f"{self.root} is not an extracted session (run `extract`)")
+            raise FileNotFoundError(f"{self.root} is not an extracted session (run `extract` or `import`)")
         with (self.root / "metadata.csv").open(newline="") as fh:
             self.rows = {int(r["frame_id"]): r for r in csv.DictReader(fh)}
         self.frame_ids = sorted(self.rows)

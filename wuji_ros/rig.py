@@ -19,6 +19,7 @@ from .paths import CALIBRATION_DIR, CAMERAS
 # session -> calibration name. Measured, not assumed: see docs/ARCHITECTURE.md.
 SESSION_CALIBRATION: Dict[str, str] = {
     "1015-5": "20261015",
+    "20261022_163051_mocap_mk4_wuji_fixed_rate": "20261015",
 }
 
 

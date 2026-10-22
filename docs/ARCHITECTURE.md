@@ -27,10 +27,10 @@ extract → segment(table, depth+RGB box) → keypoints(HaMeR, 삼각측량으�
 | `wuji_ros/paths.py` | repo 경로, `data/`·`output/` 레이아웃, `assets/`·`calibration/` 경로의 단일 출처, logger (구현됨) |
 | `wuji_ros/bridge/convert.py` | SDK frame → 메시지 필드 값. ROS·SDK import 없는 순수 함수 (구현됨, `tests/test_bridge_convert.py`) |
 | `wuji_ros/bridge/node.py` | 녹화 PC용 ROS2 노드 `wuji_glove_bridge` (구현됨) |
-| `wuji_ros/bagio.py` | bag → `data/<session>/` (마스터 클럭 동기), `Session` reader (구현됨). bag을 SQLite로 직접 읽어 `metadata.yaml`이 없어도 된다 |
+| `wuji_ros/bagio.py` | bag → `data/<session>/` (마스터 클럭 동기), `Session` reader (구현됨). bag을 SQLite로 직접 읽어 `metadata.yaml`이 없어도 된다. `import_dir`: 다른 수집기가 미리 샘플링한 폴더 → 같은 레이아웃 (구현됨) |
 | `wuji_ros/rig.py` | 캘리브 로드, camera ↔ world, 세션 → 캘리브 표 `SESSION_CALIBRATION` (구현됨. mocap → world는 아직 없음) |
 | `wuji_ros/calibcheck.py` | 캘리브 확인: 카메라별 테이블 평면, 카메라별 V1 손목 일치 (구현됨) |
-| `wuji_ros/keypoints.py` | HaMeR 2회(depth 박스 → 삼각측량 투영 박스) + DLT 삼각측량. `third_party/hamer` wrapper (sys.path 주입, `hamer.configs.CACHE_DIR_HAMER`를 `assets/hamer`로 지정). crop은 upstream ViTDetDataset 수식을 재구현(env에 scikit-image 없음) (구현됨) |
+| `wuji_ros/keypoints.py` | HaMeR 2회(depth 박스 → 삼각측량 투영 박스) + DLT 삼각측량. `third_party/hamer` wrapper (sys.path 주입, `hamer.configs.CACHE_DIR_HAMER`를 `assets/hamer`로 지정, upstream `load_hamer`와 같은 설정에 `HAMER(init_renderer=False)`. 학습 시각화용 pyrender 렌더러는 EGL이 없는 서버에서 실패한다). crop은 upstream ViTDetDataset 수식을 재구현(env에 scikit-image 없음) (구현됨) |
 | `wuji_ros/segment.py` | 테이블 평면·영역, depth + RGB 손 후보와 1차 박스, 삼각측량 골격 주변 손 점군 `hand_points` (구현됨) |
 | `wuji_ros/mano.py` | MANO forward, OpenPose-21 관절 순서 (구현됨) |
 | `wuji_ros/glovefit.py` | G1 (구현됨) |
@@ -58,6 +58,22 @@ output/<session>/<stage>/...         # 단계별 결과, 재실행 시 재사용
 ```
 
 `<session>`은 bag 이름에서 정한다. 출력 레이아웃은 입력 레이아웃을 따른다.
+
+### 미리 샘플링된 폴더 (`import`)
+
+2026-10-22 녹화부터 연구실 수집기가 bag 대신 고정 주기 폴더를 준다. 예: `data/brl_mocap_cam_hand/20261022_163051_mocap_mk4_wuji_fixed_rate/`. 15 Hz 호스트 클럭 격자에 맞춰 스트림마다 틱당 한 샘플만 남긴다.
+
+| 폴더 | `data/<session>/` |
+|---|---|
+| `image_metadata.csv` (`anchor_timestamp`, `<cam>_{color,depth}_timestamp`, `mocap_timestamp`) | `metadata.csv`. `master_stamp` = camera1 color stamp, `source_anchor_stamp` = 수집기의 격자 시각 |
+| `camera{1..4}/{color,depth}/NNNNNN.png` (표준 RGB png, uint16 mm) | 파일을 그대로 복사 |
+| 없음 | `camera{1..4}/intrinsics.json`: `--camera-config` yaml의 `cameras[].intrinsics`. 왜곡 계수는 없다 |
+| `wuji/NNNNNN.npz` (`hand_skeleton`, `emf_poses`, `tip_poses`, `hand_joint_angles`, `tactile*`, `tactile_zones_<zone>`, `tactile_point_cloud`, `imu_raw_palm_*`, `tf_*`, 스트림별 `_timestamp`) | `glove/NNNNNN.npz`. 키는 `extract`와 같다(`bagio.DIR_GLOVE_PREFIX`) |
+| `wuji_info.json` (`tf_static` 포함) | `manifest.json`의 `glove_info`, `tf_static` |
+| `mocap/NNNNNN.npz` (`position`, `orientation`, `marker_names`, `marker_positions`) | `object/NNNNNN.npz`. `orientation`은 xyzw다. 이 순서일 때 마커가 rigid body 좌표계에서 고정된다(중앙값 0.14 mm, wxyz면 4.7 mm). 좌표는 mocap 프레임 그대로다 |
+
+- 확인한 규약(`20261022_163051`): `tf_frames`는 `waist → r_wrist`다. 정지 61프레임에서 융합 자세 중력과 가속도계 중력의 차이는 중앙값 0.5°, 최대 3.1°다. skeleton 단위는 m이다.
+- 이 폴더들은 카메라끼리 하드웨어 동기가 없다. 카메라마다 위상이 고정되어 있어 4뷰 간 시간차가 최소 18 ms다.
 
 ## 손 박스 (plan.md M5)
 
@@ -99,7 +115,11 @@ output/<session>/<stage>/...         # 단계별 결과, 재실행 시 재사용
 - **world**: 카메라 중심 z가 −0.57 ~ −0.88 m라서 z-DOWN이다.
   **테이블 면은 world z에서 12.3° 기울어 있다**(4뷰 RANSAC). 보드가 테이블에 평평하게 놓이지 않은 상태로 캘리브된 것으로 보인다. 그래서 "위쪽"과 "중력"은 world z가 아니라 측정한 테이블 법선(`segment.Table.up`)으로 정한다. IMU 검증은 테이블이 수평이라고 가정한다.
 - 확인 결과는 `calibration/20261015/provenance.json`과 `docs/TODO_completed.md`에 있다.
-- 세션 → 캘리브 대응은 `wuji_ros/rig.py: SESSION_CALIBRATION`이다(`1015-5` → `20261015`).
+- 세션 → 캘리브 대응은 `wuji_ros/rig.py: SESSION_CALIBRATION`이다.
+  - `1015-5` → `20261015`.
+  - `20261022_163051_mocap_mk4_wuji_fixed_rate` → `20261015`. 녹화와 같이 온 `w2c_ext.npz`가 sha256까지 같다.
+    테이블은 카메라별로 1.22–1.53°, −9.3…+4.5 mm 안에서 일치하고, HaMeR 삼각측량 잔차는 11.4 px다(E008).
+    camera2만 체계적 투영 편차가 크다(`docs/TODO.md`).
 
 ### glove (Wuji SDK 문서)
 

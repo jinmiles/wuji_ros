@@ -8,7 +8,7 @@ physical hand, including views where the depth box missed it, and runs HaMeR aga
 its result is what is stored and triangulated once more.
 
 `third_party/hamer` is used unmodified: sys.path injection, CACHE_DIR_HAMER set to
-assets/hamer, and only `hamer.models.load_hamer` imported. The crop is
+assets/hamer, and only `hamer.models.HAMER` and `hamer.configs.get_config` imported. The crop is
 reimplemented (same maths as upstream ViTDetDataset, rescale 2.0 as in its demo)
 because hamer.datasets needs scikit-image, which the wuji_ros env does not have.
 
@@ -52,9 +52,19 @@ def _load_model(device: str = "cuda"):
     import hamer.configs
 
     hamer.configs.CACHE_DIR_HAMER = str(HAMER_DATA_DIR)
-    from hamer.models import load_hamer
+    from hamer.configs import get_config
+    from hamer.models import HAMER
 
-    model, cfg = load_hamer(str(HAMER_CHECKPOINT))
+    # Upstream load_hamer's config handling, but with HAMER's own init_renderer=False: its
+    # pyrender renderer is for training visualisation only and needs an EGL context, which
+    # fails on the 2026-10-22 analysis server (eglInitialize 12289).
+    cfg = get_config(str(HAMER_CHECKPOINT.parent.parent / "model_config.yaml"), update_cachedir=True)
+    cfg.defrost()
+    if cfg.MODEL.BACKBONE.TYPE == "vit" and "BBOX_SHAPE" not in cfg.MODEL:
+        cfg.MODEL.BBOX_SHAPE = [192, 256]
+    cfg.MODEL.BACKBONE.pop("PRETRAINED_WEIGHTS", None)
+    cfg.freeze()
+    model = HAMER.load_from_checkpoint(str(HAMER_CHECKPOINT), strict=False, cfg=cfg, init_renderer=False)
     return model.to(device).eval(), cfg
 
 
