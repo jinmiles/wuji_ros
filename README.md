@@ -7,7 +7,7 @@ Wuji Glove + 4뷰 RealSense RGB-D + OptiTrack(물체) 녹화에서 오른손의 
 현재 상태:
 - M1(glove 브리지): 수용 기준 확인(2026-10-16, `1015-5`: 120 Hz, stamp 역행 0, delay 중앙값 약 2 ms, 단위 m). 수치는 `plan.md` M1.
 - 분석: `extract → segment → glovefit → keypoints → fit / fit4 → calib → overlay / tactile`가 첫 세션 `1015-5`에서 돈다(2026-10-16). 결과는 `docs/experiments/001_glove_hand_pose/experiments.md`에 있다.
-- 2026-10-22 물체 파지 세션(`import`로 들임)에서도 끝까지 돈다(E008). 쥔 구간에서 손이 손목 유닛으로 밀리던 것은 IMU 손 방향 박스로 고쳤다(E011).
+- 2026-10-22 물체 파지 세션(`import`로 들임)에서도 끝까지 돈다(E008). 쥔 구간에서 손이 손목 유닛으로 밀리던 것은 IMU 손 방향 박스로 고쳤다(E011). 수집기 행을 그대로 들여(`--align index`, 기본, E012) 0.5 s 간격 50프레임 중 49프레임에 결과가 있다.
   다만 물체를 맨손 왼손에 건네는 프레임은 아직 틀린다(`docs/TODO.md`).
 
 ## 구성
@@ -138,7 +138,10 @@ conda run --no-capture-output -n wuji_ros python scripts/run.py tactile   --sess
 bag이 아니라 다른 수집기가 고정 주기로 이미 뽑아 둔 폴더(`image_metadata.csv`, `camera*/{color,depth}/`, `wuji/`, `mocap/`, `wuji_info.json`)는 `extract` 대신 `import`로 같은 레이아웃을 만든다.
 - 폴더에 camera_info가 없어서 intrinsics는 `--camera-config` yaml의 `cameras[].intrinsics`(fx, fy, cx, cy)에서 읽는다.
 - frame_id는 폴더 번호를 그대로 쓴다.
-- 폴더에는 스트림마다 틱당 한 샘플만 남아 있어 다시 매칭할 수 없다. 그래서 camera1 color 기준 허용오차(카메라 17 ms, glove·mocap 10 ms)를 넘는 스트림은 그 프레임에서 결측으로 둔다.
+- 폴더에는 스트림마다 틱당 한 샘플만 남아 있어 다시 매칭할 수 없다.
+  - `--align index`(기본): 수집기가 같은 행에 둔 스트림을 시간차와 상관없이 모두 쓴다. 시간차는 그대로 `metadata.csv`의 `*_dt_ms`에 남는다.
+  - `--align stamp`: camera1 color 기준 허용오차(카메라 17 ms, glove·mocap 10 ms)를 넘는 스트림은 그 프레임에서 결측으로 둔다.
+  - `--force`로 다시 import하면 결측이 된 스트림의 이전 파일을 지운다(`Session`은 파일 유무로 뷰를 읽는다).
 
 ```bash
 S=20261022_163051_mocap_mk4_wuji_fixed_rate

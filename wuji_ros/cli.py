@@ -51,6 +51,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="seconds between imported master frames (0 = every frame)")
     p.add_argument("--start", type=float, default=0.0, help="seconds after the first master frame")
     p.add_argument("--end", type=float, default=None, help="seconds after the first master frame")
+    p.add_argument("--align", choices=("index", "stamp"), default="index",
+                   help="index: keep every stream of the collector's row (offsets still in metadata.csv); "
+                        "stamp: leave out streams beyond 17 ms (cameras) / 10 ms (glove, mocap) of camera1 color")
     p.add_argument("--force", action="store_true")
 
     p = sub.add_parser("segment", help="table footprint + per-view hand boxes from calibrated depth and RGB")
@@ -97,7 +100,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     elif args.command == "import":
         from .bagio import import_dir
         import_dir(args.src, args.camera_config, session=args.session, every_s=args.every, start_s=args.start,
-                   end_s=args.end, force=args.force)
+                   end_s=args.end, align=args.align, force=args.force)
     elif args.command == "segment":
         from .segment import run
         run(args.session, force=args.force)

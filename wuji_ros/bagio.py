@@ -21,8 +21,10 @@ made its database readable.
 `import_dir` writes the same layout from a recording folder that another collector
 already sampled on its own fixed-rate host-clock grid (image_metadata.csv,
 camera{1..4}/{color,depth}/, wuji/, mocap/, wuji_info.json). Only one sample per
-stream and tick was kept there, so nothing can be re-matched: each stream is held
-against camera1 color with the same tolerances and left out when it misses them.
+stream and tick was kept there, so nothing can be re-matched: by default the
+collector's row is taken as is (align="index"), with each stream's offset to camera1
+color written to metadata.csv; align="stamp" holds each stream against camera1 color
+with the same tolerances and leaves it out when it misses them.
 """
 
 from __future__ import annotations
@@ -398,12 +400,14 @@ def _dir_glove(w: Dict[str, np.ndarray], key: str, R_wrist_from_imu: np.ndarray)
 
 
 def import_dir(src: Path, camera_config: Path, session: Optional[str] = None, every_s: float = 0.5,
-               start_s: float = 0.0, end_s: Optional[float] = None, force: bool = False) -> Path:
+               start_s: float = 0.0, end_s: Optional[float] = None, align: str = "index",
+               force: bool = False) -> Path:
     """Write data/<session>/ from a pre-sampled recording folder (module docstring); returns the session directory.
 
     Frame ids stay the folder's, so data/<session>/ frame N is the folder's frame N.
     Intrinsics come from `camera_config` (cameras[].intrinsics fx fy cx cy), since the
-    folder keeps no camera_info.
+    folder keeps no camera_info. align "index" keeps every stream of the row; "stamp"
+    leaves out a stream beyond its tolerance to camera1 color.
     """
     import yaml
 
@@ -427,6 +431,7 @@ def import_dir(src: Path, camera_config: Path, session: Optional[str] = None, ev
                  for t in (info or {}).get("tf_static", [])}
     imu_tf = tf_static.get("r_wrist->r_palm_imu_link")
     R_wrist_from_imu = _quat_matrix(imu_tf["rotation_xyzw"]) if imu_tf else None
+    check = {"stamp": True, "index": False}[align]
 
     def stamp(r: Dict[str, str], key: str) -> Optional[float]:
         return float(r[key]) if r.get(key) else None
@@ -466,9 +471,11 @@ def import_dir(src: Path, camera_config: Path, session: Optional[str] = None, ev
                 # depth is held against its own camera's colour frame, colour against the master
                 key = f"{cam}_{kind}"
                 st, p = stamp(r, f"{key}_timestamp"), src / cam / kind / f"{name}.png"
-                if st is None or abs(st - ref) > CAMERA_TOL_S or not p.is_file():
+                if st is None or (check and abs(st - ref) > CAMERA_TOL_S) or not p.is_file():
                     row[f"{key}_stamp"], row[f"{key}_dt_ms"] = "", ""
                     missing[key] = missing.get(key, 0) + 1
+                    # Session reads availability from the files: drop one an earlier --force import left
+                    (out / cam / kind / f"{name}.png").unlink(missing_ok=True)
                     continue
                 shutil.copyfile(p, out / cam / kind / f"{name}.png")
                 row[f"{key}_stamp"], row[f"{key}_dt_ms"] = f"{st:.6f}", f"{(st - t) * 1e3:.2f}"
@@ -486,7 +493,7 @@ def import_dir(src: Path, camera_config: Path, session: Optional[str] = None, ev
             g: Dict[str, np.ndarray] = {}
             for key, p in DIR_GLOVE_PREFIX.items():
                 st = float(w[f"{p}_timestamp"]) if f"{p}_timestamp" in w else None
-                if st is None or abs(st - t) > STREAM_TOL_S or (key == "imu" and R_wrist_from_imu is None):
+                if st is None or (check and abs(st - t) > STREAM_TOL_S) or (key == "imu" and R_wrist_from_imu is None):
                     row[f"glove_{key}_stamp"], row[f"glove_{key}_dt_ms"] = "", ""
                     missing[f"glove_{key}"] = missing.get(f"glove_{key}", 0) + 1
                     continue
@@ -495,12 +502,15 @@ def import_dir(src: Path, camera_config: Path, session: Optional[str] = None, ev
                 g[f"{key}_stamp"] = np.float64(st)
             if g:
                 np.savez(out / "glove" / f"{name}.npz", **g)
+            else:
+                (out / "glove" / f"{name}.npz").unlink(missing_ok=True)
 
         if has_object:
             mp, st = src / "mocap" / f"{name}.npz", stamp(r, "mocap_timestamp")
-            if st is None or abs(st - t) > STREAM_TOL_S or not mp.is_file():
+            if st is None or (check and abs(st - t) > STREAM_TOL_S) or not mp.is_file():
                 row["object_stamp"], row["object_dt_ms"] = "", ""
                 missing["object"] = missing.get("object", 0) + 1
+                (out / "object" / f"{name}.npz").unlink(missing_ok=True)
             else:
                 m = np.load(mp)
                 row["object_stamp"], row["object_dt_ms"] = f"{st:.6f}", f"{(st - t) * 1e3:.2f}"
@@ -521,8 +531,8 @@ def import_dir(src: Path, camera_config: Path, session: Optional[str] = None, ev
                 if c != MASTER_CAMERA and r.get(f"{c}_color_dt_ms") not in ("", None)]
     manifest = {
         "source": str(src), "session": session, "master": f"{MASTER_CAMERA} color stamp (image_metadata.csv)",
-        "frame_ids": "the source folder's", "every_s": every_s, "start_s": start_s, "end_s": end_s,
-        "camera_tol_ms": CAMERA_TOL_S * 1e3, "stream_tol_ms": STREAM_TOL_S * 1e3,
+        "frame_ids": "the source folder's", "every_s": every_s, "start_s": start_s, "end_s": end_s, "align": align,
+        "camera_tol_ms": CAMERA_TOL_S * 1e3 if check else None, "stream_tol_ms": STREAM_TOL_S * 1e3 if check else None,
         "first_master_stamp": t0, "master_span_s": float(master[-1][1] - t0),
         "frames": len(rows_out), "missing": missing, "cameras": cams,
         "camera_color_dt_ms": {"median": float(np.median(color_dt)), "max": float(np.max(color_dt))} if color_dt else None,

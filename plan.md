@@ -132,6 +132,7 @@ EMF:                        p_wrist(t) = T_wrist_from_emftx · p_emftx(t)     # 
 - sync 전 uptime timestamp가 섞이지 않도록 시작 시 `|header.stamp − host now|`를 확인한다. 1 s를 넘으면 발행하지 않고 에러로 끝낸다.
 - 추출 시 마스터 클럭은 `camera1` color `header.stamp`다. 나머지 카메라, depth, 물체 pose, glove는 nearest로 매칭하고 스트림별 `dt`를 기록한다.
   허용오차를 넘으면 결측으로 표시하고 버리지 않는다.
+- 다른 수집기가 미리 샘플링한 폴더(`import`)는 수집기 행을 그대로 쓰고 스트림별 `dt`만 기록한다(`--align index` 기본, 사용자 결정 2026-10-26, E012).
 - 검증(E001): 손에 마커가 없으므로 **추적되는 물체를 장갑 손으로 단단히 쥐고 회전**시키는 클립을 쓴다.
   palm IMU 각속도 크기와 물체 rigid body 각속도 크기의 상호상관으로 glove↔mocap 오프셋을 잰다.
 
