@@ -7,10 +7,10 @@
 녹화 PC에서 브리지로 bag을 기록하고, 분석 서버에서 다음 순서로 처리한다.
 
 ```
-extract → segment(table, depth+RGB box) → keypoints(HaMeR, 삼각측량으로 재박스) → G1 → V1(fit4, 4뷰 world) → calib check → overlay / tactile
+extract → segment(table, depth+RGB box) → G1 → keypoints(HaMeR, IMU 손 방향으로 재박스) → V1(fit4, 4뷰 world) → calib check → overlay / tactile
 ```
 
-계획의 순서(`extract → calib check → keypoints → segment → G1 → shape → V1 → V2 → evaluate`)와 다른 점: 손 박스가 HaMeR 전에 필요해 `segment`가 앞에 오고, β는 아직 G1에서 푼다. V2와 evaluate는 아직 없다.
+계획의 순서(`extract → calib check → keypoints → segment → G1 → shape → V1 → V2 → evaluate`)와 다른 점: 손 박스가 HaMeR 전에 필요해 `segment`가 앞에 오고, 2차 박스가 glove IMU의 world 자세(G1 필요)를 써서 G1이 `keypoints` 앞에 온다. β는 아직 G1에서 푼다. V2와 evaluate는 아직 없다.
 
 ```
 ```
@@ -30,11 +30,11 @@ extract → segment(table, depth+RGB box) → keypoints(HaMeR, 삼각측량으�
 | `wuji_ros/bagio.py` | bag → `data/<session>/` (마스터 클럭 동기), `Session` reader (구현됨). bag을 SQLite로 직접 읽어 `metadata.yaml`이 없어도 된다. `import_dir`: 다른 수집기가 미리 샘플링한 폴더 → 같은 레이아웃 (구현됨) |
 | `wuji_ros/rig.py` | 캘리브 로드, camera ↔ world, 세션 → 캘리브 표 `SESSION_CALIBRATION` (구현됨. mocap → world는 아직 없음) |
 | `wuji_ros/calibcheck.py` | 캘리브 확인: 카메라별 테이블 평면, 카메라별 V1 손목 일치 (구현됨) |
-| `wuji_ros/keypoints.py` | HaMeR 2회(depth 박스 → 삼각측량 투영 박스) + DLT 삼각측량. `third_party/hamer` wrapper (sys.path 주입, `hamer.configs.CACHE_DIR_HAMER`를 `assets/hamer`로 지정, upstream `load_hamer`와 같은 설정에 `HAMER(init_renderer=False)`. 학습 시각화용 pyrender 렌더러는 EGL이 없는 서버에서 실패한다). crop은 upstream ViTDetDataset 수식을 재구현(env에 scikit-image 없음) (구현됨) |
+| `wuji_ros/keypoints.py` | HaMeR 2회(depth 박스 → 삼각측량 투영 박스) + DLT 삼각측량. `third_party/hamer` wrapper (sys.path 주입, `hamer.configs.CACHE_DIR_HAMER`를 `assets/hamer`로 지정, upstream `load_hamer`와 같은 설정에 `HAMER(init_renderer=False)`. 학습 시각화용 pyrender 렌더러는 EGL이 없는 서버에서 실패한다). crop은 upstream ViTDetDataset 수식을 재구현(env에 scikit-image 없음). 오른손만: 두 pass 모두 HaMeR 손바닥 관절 6개 중 2개 이상이 어두운(검은 장갑) 픽셀 위에 있는 뷰만 쓴다 (구현됨) |
 | `wuji_ros/segment.py` | 테이블 평면·영역, depth + RGB 손 후보와 1차 박스, 삼각측량 골격 주변 손 점군 `hand_points` (구현됨) |
 | `wuji_ros/mano.py` | MANO forward, OpenPose-21 관절 순서 (구현됨) |
-| `wuji_ros/glovefit.py` | G1 (구현됨) |
-| `wuji_ros/handfit.py` | V1 카메라별(`fit`)과 4뷰 world(`fit4`) (구현됨). `fit4`는 glove 융합 IMU 기울기 항(기본 가중치 100)과 2D 라벨 거울 가설(손바닥/손등 뒤집힘 대응)을 쓴다. β는 현재 G1에서 푼다. V2는 아직 없음 |
+| `wuji_ros/glovefit.py` | G1, glove IMU 자세의 world 변환(`waist_in_world`, `keypoints`·`fit4` 공용) (구현됨) |
+| `wuji_ros/handfit.py` | V1 카메라별(`fit`)과 4뷰 world(`fit4`) (구현됨). `fit4`는 glove 융합 IMU 자세 항(기울기 + 세션 yaw, 기본 가중치 100)과 IMU 시작점, 2D 라벨 거울 가설(손바닥/손등 뒤집힘 대응)을 쓴다. β는 현재 G1에서 푼다. V2는 아직 없음 |
 | `wuji_ros/viz.py` | 카메라 overlay(손 mesh + MANO 골격만), 촉각 맵 별도 시퀀스, 각각 H.264(yuv444p) mp4 + gif (구현됨) |
 | `wuji_ros/evaluate.py` | 일치도 지표, 프레임별 라벨 |
 | `wuji_ros/cli.py`, `scripts/run.py` | 분석 entrypoint, 단계별 subcommand, `--force` (구현됨) |
@@ -79,7 +79,9 @@ output/<session>/<stage>/...         # 단계별 결과, 재실행 시 재사용
 
 캘리브된 depth, RGB, HaMeR로 잡는다.
 1. `segment`: 4뷰 depth를 world로 합친다. 테이블 영역 위 1.2–35 cm에 있고 RGB가 어두운(검은 장갑·소매) 점 중 가장 큰 덩어리를 고른다. 테이블 가장자리에서 팔이 들어오는 지점에서 가장 먼 13 cm를 손으로 보고, 각 뷰에 투영해 1차 박스로 쓴다. 맨손인 왼손과 밝은 옷은 RGB 조건에서 빠진다.
-2. `keypoints`: 1차 박스로 HaMeR를 돌리고 4뷰 2D를 삼각측량한다(DLT, 잔차 40 px 넘는 뷰는 3뷰가 남을 때까지 뺀다). 그 3D 관절을 모든 뷰에 투영해 박스를 다시 잡고 HaMeR를 한 번 더 돌린다. 모든 뷰가 같은 물리적 손을 본다.
+2. `keypoints`: 1차 박스로 HaMeR를 돌리고 4뷰 2D를 삼각측량한다(DLT, 잔차 40 px 넘는 뷰는 3뷰가 남을 때까지 뺀다). 손바닥 관절이 검은 장갑 위에 2개 미만인 뷰는 버린다(오른손만).
+   그다음 2차 박스를 잡는다. 1차 손(삼각측량, 없으면 depth 후보) 주변 20 cm의 어두운 덩어리 중, glove IMU가 주는 world 손 방향(r_wrist −Z)으로 끝에서 13 cm다. IMU가 없으면 삼각측량 투영, 그것도 없으면 1차 박스를 쓴다. 그 박스로 HaMeR를 한 번 더 돌린다. 모든 뷰가 같은 물리적 손을 본다.
+   물체를 쥔 동안 장갑, 검은 손목 유닛, 팔뚝은 하나의 어두운 덩어리가 된다. 그래서 1차 박스와 삼각측량 둘레로 잡은 박스에서는 HaMeR가 손을 손목 유닛 쪽으로 밀었다(E008).
 3. 손 점군(`segment.hand_points`): 삼각측량 골격의 뼈에서 3 cm 안이고 테이블 위인 depth 점이다. 팔뚝은 손목 관절 밖이라 빠진다.
 
 처음 버전(2026-10-16 새벽)은 캘리브 없이 SAM3 텍스트 프롬프트로 박스를 잡았다. 캘리브가 도착한 뒤 사용자 요청으로 이 방식으로 바꾸고 SAM3 의존을 없앴다.
@@ -128,7 +130,10 @@ output/<session>/<stage>/...         # 단계별 결과, 재실행 시 재사용
 - `emf_poses`: `r_hand_emf_tx` 프레임. `T_wrist_from_emftx`는 `tf_static`이다(회전 포함, 2026-10-15 실측 약 13.6°). bag의 `/tf_static`에서 읽는다.
 - 촉각 taxel(`tactile_point_cloud`)은 `r_wrist` 프레임이다. `fit4`의 `T_world_from_wrist`로 world에 옮긴다. `1015-5`에서 taxel과 G1 MANO 표면의 거리 중앙값은 5.5 mm다.
 - glove 중력은 SDK 융합 자세 `/wuji_glove/right/tf`(`waist → r_wrist`, waist z-up)에서 `R_waist_from_wrist^T (0,0,−1)`로 구한다(roll·pitch만 의미가 있다). `imu_raw` 가속도계는 정지할 때만 중력이다.
-- palm IMU 축은 손목 축과 다르다: `T_wrist_from_palmimu`의 회전이 x축 90°다(2026-10-15 실측). roll·pitch만 신뢰하고 yaw는 드리프트한다.
+- palm IMU 축은 손목 축과 다르다: `T_wrist_from_palmimu`의 회전이 x축 90°다(2026-10-15 실측). yaw는 드리프트한다.
+- `fit4`의 IMU 회전(2026-10-26부터, plan.md §6 14): `R_world_from_wrist = R_world_from_waist · R_waist_from_wrist`.
+  waist z는 world 위쪽(테이블 법선)에 맞춘다. waist의 world yaw는 세션 상수 하나로, HaMeR 뷰마다 `R_world_from_mano · R_wrist_from_mano^T · R_waist_from_wrist^T`의 yaw를 구한 최빈값이다(`glovefit.waist_in_world`; `keypoints`는 1차 뷰로, `fit4`는 2차 뷰로 구한다).
+  `20261022_163051`에서 waist z와 테이블 법선은 4° 차이였다(`fit4` 결과로 3축을 다 풀었을 때). HaMeR 뷰 133개 중 75%가 최빈값 ±30° 안에 있다.
 
 ## 시간 규약
 

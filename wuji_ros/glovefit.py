@@ -16,11 +16,15 @@ MANO rotation centres), so the residuals are reported, not assumed zero.
         R_wrist_from_mano (3,3), t_wrist_from_mano (3,), joints_wrist (21,3),
         palm_err_mm (6,), bone_err_deg (15,), tip_err_mm (5,)
     output/<session>/glovefit/summary.json
+
+waist_in_world() carries the glove's fused IMU pose (waist -> r_wrist) into the
+calibrated world for keypoints (hand box) and handfit (fit4 IMU term).
 """
 
 from __future__ import annotations
 
 import json
+from typing import List, Optional, Tuple
 
 import numpy as np
 
@@ -30,6 +34,35 @@ from .paths import frame_name, get_logger, stage_dir
 LOGGER = get_logger("wuji_ros.glovefit")
 ITERS = 1500
 W_PALM, W_BONE, W_LEN, W_THETA, W_BETA = 1.0, 100.0, 1.0, 0.1, 1.0  # palm/len in mm^2, bone unitless
+YAW_BANDWIDTH_DEG = 10.0  # kernel width for the session's waist yaw mode over HaMeR views
+
+
+def waist_in_world(views: List[Tuple[np.ndarray, np.ndarray, np.ndarray]], up: np.ndarray
+                   ) -> Tuple[Optional[np.ndarray], float, float]:
+    """R_world_from_waist of the glove's fused IMU pose, from HaMeR views.
+
+    views: (R_world_from_mano of one HaMeR view, G1 R_wrist_from_mano, IMU R_waist_from_wrist)
+    of its frame. Since R_world_from_mano = R_world_from_wrist R_wrist_from_mano, each view
+    gives R_world_from_waist = R_world_from_mano R_wrist_from_mano^T R_waist_from_wrist^T.
+    The SDK's waist frame is z-up, so only its yaw about the table normal `up` is unknown.
+    Each sample's yaw is the best planar rotation of B^T R in a world basis B whose z is
+    `up`; the session yaw is the mode of their circular kernel density, which HaMeR's
+    flipped views do not move. Returns (R or None without views, yaw deg, fraction of
+    samples within 30 deg of it).
+    """
+    if not views:
+        return None, float("nan"), 0.0
+    x = np.array([1.0, 0.0, 0.0]) - up[0] * up
+    x /= np.linalg.norm(x)
+    Bw = np.stack([x, np.cross(up, x), up], axis=1)
+    M = [Bw.T @ R_wm @ R_g.T @ Rw.T for R_wm, R_g, Rw in views]
+    yaws = np.array([np.arctan2(m[1, 0] - m[0, 1], m[0, 0] + m[1, 1]) for m in M])
+    grid = np.radians(np.arange(360.0))
+    d = np.angle(np.exp(1j * (grid[:, None] - yaws[None])))
+    psi = grid[np.argmax(np.exp(-0.5 * (d / np.radians(YAW_BANDWIDTH_DEG)) ** 2).sum(1))]
+    support = float(np.mean(np.abs(np.angle(np.exp(1j * (yaws - psi)))) < np.radians(30)))
+    c, s = np.cos(psi), np.sin(psi)
+    return Bw @ np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]]), float(np.degrees(psi)), support
 
 
 def _kabsch(src: np.ndarray, dst: np.ndarray):

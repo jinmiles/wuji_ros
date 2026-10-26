@@ -162,7 +162,7 @@ EMF:                        p_wrist(t) = T_wrist_from_emftx · p_emftx(t)     # 
 | `/tf_static` | `tf2_msgs/TFMessage` | `r_wrist → r_hand_emf_tx`, `r_wrist → r_palm_imu_link` |
 
 - 표준 메시지만 쓴다(6절 결정).
-- SDK가 주는 Wuji Glove 스트림은 모두 기록한다(2026-10-07 결정). 이전에는 IMU 기반 `tf`(`waist → wrist`)를 발행하지 않았다. 지금은 `/wuji_glove/right/tf`에 기록만 하고, 손목 6D 소스로는 쓰지 않는다.
+- SDK가 주는 Wuji Glove 스트림은 모두 기록한다(2026-10-07 결정). 이전에는 IMU 기반 `tf`(`waist → wrist`)를 발행하지 않았다. 지금은 `/wuji_glove/right/tf`에 기록만 하고, 손목 6D 소스로는 쓰지 않는다. 다만 그 회전은 2026-10-26부터 V1 손실과 시작점에 쓴다(§6 14). 위치는 쓰지 않는다.
 - 녹화를 멈추는 조건:
   - device stamp가 호스트 시계와 `--max-clock-skew`(기본 1 s) 넘게 다를 때. time sync 전에 찍힌 uptime stamp를 막는다.
   - `emf_poses`가 `--stall-timeout`(기본 2 s) 동안 오지 않을 때.
@@ -228,6 +228,7 @@ EMF:                        p_wrist(t) = T_wrist_from_emftx · p_emftx(t)     # 
   - 초기 후보는 4뷰 HaMeR 회전 평균, 뷰별 HaMeR 회전, 그리고 각각을 손 길이축으로 180° 뒤집은 것이다. 이동은 점군 중심에서 잡는다.
     **데이터 손실이 가장 낮은 해**를 고른다.
   - ~~IMU 기울기는 선택에 쓰지 않는다.~~ 2026-10-16 변경(§6 13): 검은 장갑에서는 HaMeR가 모든 뷰에서 손바닥과 손등을 함께 뒤집는다. 그래서 glove 융합 IMU 자세의 기울기를 V1 손실에 넣고, 2D 라벨을 손가락 거울 순서로 바꾼 가설도 함께 푼다. 그 대신 IMU는 독립 검증 채널이 아니다.
+  - 2026-10-26 변경(§6 14): IMU 자세 전체(기울기 + 세션 yaw)를 손실과 후보 시작점에 쓴다.
 - **V2**: V1 결과에서 θ를 풀되 `‖θ − θ_glove‖` prior를 둔다.
 - 프레임별 라벨:
   - 뷰별 마스크 IoU: MANO를 투영해 래스터화한 마스크 vs 손 픽셀. < 0.6이면 저신뢰로 표시하되 버리지 않는다.
@@ -303,6 +304,10 @@ EMF:                        p_wrist(t) = T_wrist_from_emftx · p_emftx(t)     # 
     `mocap2cam.npy`는 전달값이 아니라 유도한 임시값이다. 새 녹화에서의 유효성은 M4에서 확인한다(`docs/TODO.md`).
 
 13. **IMU 기울기를 V1에 사용** (2026-10-16, 사용자 결정): `fit4`에 glove 융합 IMU 자세(`/wuji_glove/right/tf`, roll·pitch만)의 기울기 항을 넣는다. 기본 가중치는 100으로, 손바닥/손등 뒤집힘의 벌점이 200이다. 뒤집힘 검증은 육안(손등 EMF 송신기 방향, 인접 프레임 엄지 위치)과 `--imu-weight 0` 조건 비교로 한다.
+14. **IMU 자세 전체를 V1에 사용** (2026-10-26, 사용자 요청: "튀는 프레임을 IMU로 보정"): `fit4`의 IMU 항을 기울기에서 회전 전체로 넓힌다.
+    waist 좌표계는 z-up이라 world와 다른 것은 세션 yaw 하나다. 이 yaw는 모든 HaMeR 뷰 방향과 IMU 자세로 구한 값들의 최빈값으로 정한다(`handfit.waist_in_world`). IMU 자세는 후보 시작점에도 넣는다.
+    근거(E008): `fit4`가 IMU와 30° 넘게 어긋난 9프레임이 육안으로 틀린 프레임과 같다. f320·f328은 어긋남의 대부분이 yaw라 기울기 항으로는 보이지 않는다.
+    가정: take 안의 yaw 드리프트는 작다(E008 26 s에서 맞는 프레임의 yaw 잔차 ±13°). 손 위치는 여전히 4뷰 RGB-D가 정한다.
 
 미결:
 - D. **물체**: 다음 주 실험에서 정해진다. 물체 종류, CAD·마커 오프셋 유무에 따라 M5 분할의 물체 제거와 M9 범위가 정해진다.

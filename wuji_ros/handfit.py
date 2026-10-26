@@ -197,7 +197,7 @@ def load(session: str, cam: str, frame_id: int):
     return dict(np.load(p)) if p.is_file() else None
 
 
-IMU_WEIGHT = 100.0  # fit4 tilt term: a palm/back flip costs 2x this, a 4 deg tilt 0.24; 50 left f73 flipped
+IMU_WEIGHT = 100.0  # fit4 IMU term: a palm/back flip costs 2x this, a 4 deg error 0.24; 50 left f73 flipped
 # HaMeR's 2D under a palm/back flip: thumb <-> pinky and index <-> ring swap places
 # (a right hand palm-up seen from above has the outline of a right hand palm-down
 # mirrored). OpenPose-21: thumb 1-4, index 5-8, middle 9-12, ring 13-16, pinky 17-20.
@@ -212,28 +212,35 @@ def run_world(session: str, glove_thickness_m: float = 0.0, imu_weight: float = 
     per view, surface over every view's hand points. Starts: the wrist at the
     triangulated HaMeR wrist, the rotation of every view's HaMeR global orientation
     carried into world, and each of those flipped 180 deg about the hand's length
-    axis. Each start is solved twice: against HaMeR's 2D as labelled, and against it
-    with the fingers mirrored (MIRROR_LABELS), which is what HaMeR's 2D is when it
-    has flipped palm and back. The lowest total loss wins.
+    axis, plus the IMU orientation below. Each start is solved twice: against HaMeR's
+    2D as labelled, and against it with the fingers mirrored (MIRROR_LABELS), which is
+    what HaMeR's 2D is when it has flipped palm and back. The lowest total loss wins.
 
-    IMU tilt term (2026-10-16, user decision; plan.md §6 13): imu_weight * (1 - cos)
-    of the angle between the glove's fused gravity (gravity_wrist_fused, from the
-    SDK's IMU pose: roll/pitch only, yaw drifts) carried into world by the fitted
-    hand, and world gravity. On a black glove HaMeR flips palm and back in every view
-    at once (1015-5, t = 31.8-39.4 s, confirmed by eye: the back-of-hand EMF
-    transmitter is not visible from above), and images cannot outvote that; the IMU
-    can. A flip costs 2 * imu_weight, a few degrees of IMU-to-wrist misalignment
-    almost nothing. imu_weight = 0 is the image-only fit. World gravity is minus the
-    measured table normal (segment.Table.up), i.e. a level table is assumed; world z
-    is not usable, the 20261015 calibration's board was ~12 deg off the tabletop.
-    With the term on, gravity_err_deg is no longer an independent check.
+    IMU term (plan.md §6 13, 14): imu_weight * (1 - cos) of the angle between the
+    fitted hand's R_world_from_wrist and the glove's fused IMU pose carried into world,
+    R_world_from_waist R_waist_from_wrist. The SDK's waist frame is z-up, i.e. its
+    tilt is gravity: world gravity is minus the measured table normal
+    (segment.Table.up; a level table is assumed, world z is not usable, the 20261015
+    calibration's board was ~12 deg off the tabletop). Its yaw is one session constant
+    (glovefit.waist_in_world over every HaMeR view x the IMU pose); the IMU's slow yaw drift
+    within a take is assumed small next to the errors this term is for.
+      - 2026-10-16: tilt only. On a black glove HaMeR flips palm and back in every
+        view at once (1015-5, t = 31.8-39.4 s), and images cannot outvote that.
+      - 2026-10-26: full rotation. While the object is held, HaMeR's views can all be
+        wrong about the hand's heading, which tilt cannot see (E008 f320/f328: 84 and
+        102 deg of yaw off), and the HaMeR starts never reach the right basin; the
+        IMU orientation is also a start.
+    A flip costs 2 * imu_weight, a few degrees of IMU-to-wrist misalignment almost
+    nothing. imu_weight = 0 is the image-only fit, without the IMU start; only then are
+    gravity_err_deg and imu_rot_err_deg independent checks.
 
         output/<session>/fit4/NNNNNN.npz   R_world_from_mano, wrist_world, T_world_from_wrist (4,4)
             (the glove's r_wrist frame, for its taxels and skeleton), joints_world (21,3),
-            verts_world (778,3), views, reproj_px (V,21), surface_mm_median, start_camera,
-            start_flipped (the HaMeR view whose orientation started the winner),
+            verts_world (778,3), views, reproj_px (V,21), surface_mm_median, start_camera
+            (the HaMeR view whose orientation started the winner, or "imu"), start_flipped,
             labels_mirrored (the winner used MIRROR_LABELS), gravity_err_deg
-            (fused IMU), gravity_err_accel_deg (accelerometer), image_loss, imu_loss
+            (fused IMU tilt), gravity_err_accel_deg (accelerometer), imu_rot_err_deg
+            (fused IMU, whole rotation), image_loss, imu_loss
         output/<session>/fit4/summary.json
     """
     import torch
@@ -258,10 +265,11 @@ def run_world(session: str, glove_thickness_m: float = 0.0, imu_weight: float = 
     cams = list(s.cameras)
     Ks = torch.tensor(np.stack([s.K(c) for c in cams]), dtype=torch.float32, device=dev)
     Tcw = torch.tensor(np.stack([rig.T_cam_from_world[c] for c in cams]), dtype=torch.float32, device=dev)
-    g_world = -segment.load_table(session).up  # assumes a level table
+    up = segment.load_table(session).up
+    g_world = -up  # assumes a level table
 
     hand_pts = _hand_points(s, session, rng)
-    frames, gfit, targets, vmask, clouds, starts, g_mano = [], [], [], [], [], [], []
+    frames, gfit, targets, vmask, clouds, starts, R_waist = [], [], [], [], [], [], []
     for f in s.frame_ids:
         g, tri = glovefit.load(session, f), keypoints.load_triangulated(session, f)
         if g is None or tri is None:
@@ -281,9 +289,7 @@ def run_world(session: str, glove_thickness_m: float = 0.0, imu_weight: float = 
         frames.append(f)
         gfit.append(g)
         gl = s.glove(f)
-        # glove gravity in the MANO frame: p_wrist = R_g p_mano + t_g
-        g_mano.append(g["R_wrist_from_mano"].T @ gl["gravity_wrist_fused"]
-                      if gl is not None and "gravity_wrist_fused" in gl else np.zeros(3))
+        R_waist.append(gl["R_waist_from_wrist"] if gl is not None and "R_waist_from_wrist" in gl else None)
         targets.append(tg)
         vmask.append(vm)
         cloud = np.concatenate(pts) if pts else np.zeros((0, 3))
@@ -295,6 +301,13 @@ def run_world(session: str, glove_thickness_m: float = 0.0, imu_weight: float = 
         raise SystemExit(f"{session}: no frame with two or more views")
     B, V = len(frames), len(cams)
     LOGGER.info("%s: %d frames with >= 2 views", session, B)
+    imu_views = [(R_wm, g["R_wrist_from_mano"], Rw)
+                 for st, g, Rw in zip(starts, gfit, R_waist) if Rw is not None for _, R_wm, _ in st]
+    R_world_from_waist, yaw_deg, yaw_support = glovefit.waist_in_world(imu_views, up)
+    R_imu = [None if Rw is None or R_world_from_waist is None else R_world_from_waist @ Rw @ g["R_wrist_from_mano"]
+             for g, Rw in zip(gfit, R_waist)]
+    LOGGER.info("IMU waist yaw in world %.0f deg: %.0f%% of %d HaMeR views within 30 deg", yaw_deg,
+                100 * yaw_support, len(imu_views))
 
     eye = torch.eye(3, device=dev)
     betas = torch.tensor(gfit[0]["betas"], dtype=torch.float32, device=dev).expand(B, 10)
@@ -317,6 +330,9 @@ def run_world(session: str, glove_thickness_m: float = 0.0, imu_weight: float = 
             for fl in (0, 1):
                 for mi in (0, 1):
                     cand.append((i, R, w, ci, fl, mi))
+        if imu_weight > 0 and R_imu[i] is not None:  # for frames where every HaMeR view is wrong
+            for mi in (0, 1):
+                cand.append((i, R_imu[i], st[0][2], -1, 0, mi))
     idx = torch.tensor([c[0] for c in cand], device=dev)
     R_start = torch.tensor(np.stack([c[1] for c in cand]), dtype=torch.float32, device=dev)
     fl_t = torch.tensor([c[4] for c in cand], device=dev).bool()
@@ -335,8 +351,8 @@ def run_world(session: str, glove_thickness_m: float = 0.0, imu_weight: float = 
         P[i, :len(p)] = torch.tensor(p, dtype=torch.float32, device=dev)
         Pm[i, :len(p)] = 1.0
     Jl, Vl, Pl, Pml = (Jm - J0)[idx], (Vs - J0)[idx], P[idx], Pm[idx]
-    Gm = torch.tensor(np.stack(g_mano), dtype=torch.float32, device=dev)[idx]  # zero where no IMU
-    Gw = torch.tensor(g_world, dtype=torch.float32, device=dev)
+    Ri = torch.tensor(np.stack([np.eye(3) if r is None else r for r in R_imu]), dtype=torch.float32, device=dev)[idx]
+    Hi = torch.tensor([r is not None for r in R_imu], dtype=torch.float32, device=dev)[idx]
 
     def solve(sl):
         w = torch.zeros(sl.stop - sl.start, 3, device=dev, requires_grad=True)
@@ -355,8 +371,8 @@ def run_world(session: str, glove_thickness_m: float = 0.0, imu_weight: float = 
             dmin = torch.cdist(Pl[sl], Vw).min(-1).values * 1e3
             srf = torch.nn.functional.huber_loss(dmin, torch.zeros_like(dmin), delta=HUBER_MM, reduction="none")
             srf = (srf * Pml[sl]).sum(1) / Pml[sl].sum(1).clamp(min=1)
-            g_pred = torch.einsum("bij,bj->bi", R, Gm[sl])
-            imu = imu_weight * (Gm[sl].norm(dim=-1) - g_pred @ Gw)  # 1 - cos, 0 where no IMU
+            # 1 - cos of the rotation between fit and IMU, (3 - tr(R^T R_imu)) / 2; 0 where no IMU
+            imu = imu_weight * Hi[sl] * (3 - (R * Ri[sl]).sum((-2, -1))) / 2
             return R, Jw, Vw, uv, dmin, rep + srf, imu
 
         for _ in range(ITERS):
@@ -374,7 +390,7 @@ def run_world(session: str, glove_thickness_m: float = 0.0, imu_weight: float = 
     out.mkdir(parents=True, exist_ok=True)
     loss_np = loss.cpu().numpy()
     img_np, imu_np = img_loss.cpu().numpy(), imu_loss.cpu().numpy()
-    rep_all, srf_all, grav_all, flips, mirrored = [], [], [], 0, 0
+    rep_all, srf_all, grav_all, rot_all, flips, mirrored, imu_starts = [], [], [], [], 0, 0, 0
     for i, f in enumerate(frames):
         mine = [n for n in range(N) if cand[n][0] == i]
         best = min(mine, key=lambda n: loss_np[n])
@@ -391,6 +407,8 @@ def run_world(session: str, glove_thickness_m: float = 0.0, imu_weight: float = 
         if gl is not None and "gravity_wrist" in gl:
             g_w = Rb @ gfit[i]["R_wrist_from_mano"].T @ gl["gravity_wrist"]
             grav_acc = float(np.degrees(np.arccos(np.clip(g_w @ g_world, -1, 1))))
+        rot_err = float("nan") if R_imu[i] is None else \
+            float(np.degrees(np.arccos(np.clip((np.trace(Rb.T @ R_imu[i]) - 1) / 2, -1, 1))))
         # glove r_wrist -> world: p_mano = R_g^T (p_wrist - t_g), p_world = Rb (p_mano - J0) + wrist
         R_g, t_g = gfit[i]["R_wrist_from_mano"], gfit[i]["t_wrist_from_mano"]
         T_ww = np.eye(4)
@@ -400,28 +418,36 @@ def run_world(session: str, glove_thickness_m: float = 0.0, imu_weight: float = 
                  T_world_from_wrist=T_ww,
                  joints_world=Jw[best].cpu().numpy(), verts_world=Vw[best].cpu().numpy().astype(np.float32),
                  views=np.array(views), reproj_px=reproj, surface_mm_median=surf,
-                 start_camera=cams[cand[best][3]], start_flipped=int(cand[best][4]),
+                 start_camera=cams[cand[best][3]] if cand[best][3] >= 0 else "imu", start_flipped=int(cand[best][4]),
                  labels_mirrored=int(cand[best][5]), gravity_err_deg=grav_err,
-                 gravity_err_accel_deg=grav_acc, image_loss=float(img_np[best]), imu_loss=float(imu_np[best]))
+                 gravity_err_accel_deg=grav_acc, imu_rot_err_deg=rot_err,
+                 image_loss=float(img_np[best]), imu_loss=float(imu_np[best]))
         rep_all.append(np.median(reproj))
         srf_all.append(surf)
         grav_all.append(grav_err)
+        rot_all.append(rot_err)
         flips += cand[best][4]
         mirrored += cand[best][5]
-    g = np.array(grav_all)
+        imu_starts += cand[best][3] < 0
+    g, r = np.array(grav_all), np.array(rot_all)
     summary = {
         "calibration": rig.name, "glove_thickness_m": glove_thickness_m, "imu_weight": imu_weight,
         "imu_in_loss": imu_weight > 0, "frames": B, "flipped_start_chosen": flips, "labels_mirrored_frames": mirrored,
+        "imu_start_chosen": imu_starts,
         "reproj_px_median": float(np.median(rep_all)), "surface_mm_median": float(np.nanmedian(srf_all)),
         "gravity_err_deg_median": float(np.nanmedian(g)), "gravity_err_deg_p90": float(np.nanpercentile(g, 90)),
         "gravity_err_over_90deg_frames": int((g > 90).sum()),
         "gravity_source": "fused IMU pose (gravity_wrist_fused)",
+        "imu_waist_yaw_deg": yaw_deg, "imu_waist_yaw_support": yaw_support,
+        "imu_rot_err_deg_median": float(np.nanmedian(r)), "imu_rot_err_deg_p90": float(np.nanpercentile(r, 90)),
+        "imu_rot_err_over_30deg_frames": int((r > 30).sum()),
     }
     (out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     LOGGER.info("%s (imu_weight %g): %d frames, reproj %.1f px, surface %.1f mm, IMU tilt err %.1f deg median / "
-                "%.1f p90, %d > 90 deg", session, imu_weight, B, summary["reproj_px_median"], summary["surface_mm_median"],
-                summary["gravity_err_deg_median"], summary["gravity_err_deg_p90"],
-                summary["gravity_err_over_90deg_frames"])
+                "%.1f p90, %d > 90 deg; IMU rotation err %.1f deg median, %d > 30 deg", session, imu_weight, B,
+                summary["reproj_px_median"], summary["surface_mm_median"], summary["gravity_err_deg_median"],
+                summary["gravity_err_deg_p90"], summary["gravity_err_over_90deg_frames"],
+                summary["imu_rot_err_deg_median"], summary["imu_rot_err_over_30deg_frames"])
 
 
 def load_world(session: str, frame_id: int):

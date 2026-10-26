@@ -3,9 +3,26 @@
 Pass 1 runs HaMeR inside segment.py's depth + RGB boxes. Its 2D joints are
 triangulated over the views (DLT; the worst view is dropped while its median
 residual exceeds TRIANGULATION_OUTLIER_PX and three views remain). Pass 2 re-boxes
-every view around the projection of those 3D joints, so all views frame the same
-physical hand, including views where the depth box missed it, and runs HaMeR again;
-its result is what is stored and triangulated once more.
+every view around one 3D hand, so all views frame the same physical hand, including
+views where the depth box missed it, and runs HaMeR again; its result is what is
+stored and triangulated once more. The pass-2 hand, first available of:
+  - "imu": the glove, found with its IMU (needs glovefit). Of segment's dark cluster
+    within IMU_BOX_RADIUS_M of the pass-1 hand (triangulated, else the depth hand
+    candidate), the part within HAND_REACH_M of its far end along the hand's direction:
+    r_wrist -Z (wrist -> middle MCP) carried into world by the fused IMU pose and the
+    session waist yaw (glovefit.waist_in_world over the pass-1 views). While the object
+    is held, the glove, the black wrist unit and the forearm form one dark cluster and
+    the depth box framed all of them; HaMeR then slid the whole hand onto the wrist
+    unit in some views, and re-boxing around that triangulation kept it there (E008).
+  - "triangulated": the pass-1 triangulation projected;
+  - "depth": the pass-1 box.
+
+Right hand only (plan.md §6 4): the right hand is the one in the black glove. In both
+passes a view counts only if at least MIN_GLOVE_PALM_JOINTS of HaMeR's palm joints
+(wrist, thumb CMC, the four MCPs) lie on dark pixels (segment.DARK_V). The bare left
+hand, the light sleeve and the object are not dark; on 20261022_163051 (E008) this
+drops the views locked on the left hand (f184, f192) or slid onto the sleeve (f168,
+f200), and none of the views checked by eye as right.
 
 `third_party/hamer` is used unmodified: sys.path injection, CACHE_DIR_HAMER set to
 assets/hamer, and only `hamer.models.HAMER` and `hamer.configs.get_config` imported. The crop is
@@ -19,7 +36,7 @@ full-image pixels.
 
     output/<session>/keypoints/<camera>/NNNNNN.npz
         keypoints_2d (21,2) px, global_orient_cam (3,3), hand_pose (15,3,3), betas (10,),
-        box (4,), box_center (2,), box_size, box_source ("depth" | "triangulated")
+        box (4,), box_center (2,), box_size, box_source ("imu" | "triangulated" | "depth"), glove_palm_joints
     output/<session>/keypoints/triangulated/NNNNNN.npz
         joints_world (21,3), views (str), residual_px (V,) median per used view
 """
@@ -35,8 +52,8 @@ import numpy as np
 
 from .bagio import Session
 from .paths import HAMER_CHECKPOINT, HAMER_DATA_DIR, HAMER_ROOT, frame_name, get_logger, stage_dir
-from .rig import rig_for
-from . import segment
+from .rig import Rig, rig_for
+from . import glovefit, segment
 
 LOGGER = get_logger("wuji_ros.keypoints")
 RESCALE = 2.0
@@ -45,6 +62,19 @@ BBOX_SHAPE = (192, 256)  # w, h aspect HaMeR's ViT crop expects
 BATCH = 16
 TRIANGULATION_OUTLIER_PX = 40.0
 REBOX_MARGIN = 0.10  # around the projected joints; HaMeR's own RESCALE adds the context
+GLOVE_PALM = [0, 1, 5, 9, 13, 17]
+MIN_GLOVE_PALM_JOINTS = 2  # of 6; 3 also dropped right camera4 views whose palm edge is over the object
+IMU_BOX_RADIUS_M = 0.20  # around the pass-1 hand: reaches the glove from the wrist unit, not the body
+
+
+def palm_on_glove(image: np.ndarray, kp2d: np.ndarray) -> int:
+    """How many palm joints of `kp2d` lie on dark pixels (median V of a 7x7 patch), i.e. on the glove."""
+    v = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)[:, :, 2]
+    n = 0
+    for x, y in np.round(kp2d[GLOVE_PALM]).astype(int):
+        if 0 <= x < v.shape[1] and 0 <= y < v.shape[0]:
+            n += int(np.median(v[max(y - 3, 0):y + 4, max(x - 3, 0):x + 4]) < segment.DARK_V)
+    return n
 
 
 def _load_model(device: str = "cuda"):
@@ -140,23 +170,65 @@ class _Hamer:
             chunk = jobs[start:start + BATCH]
             patches, meta = [], []
             for cam, f, box in chunk:
-                patch, center, size = crop(s.color(cam, f), box, self.mean, self.std)
+                image = s.color(cam, f)
+                patch, center, size = crop(image, box, self.mean, self.std)
                 patches.append(patch)
-                meta.append((cam, f, box, center, size))
+                meta.append((cam, f, box, center, size, image))
             with torch.no_grad():
                 pred = self.model({"img": torch.from_numpy(np.stack(patches)).cuda()})
             kp = pred["pred_keypoints_2d"].float().cpu().numpy()
             params = {k: v.float().cpu().numpy() for k, v in pred["pred_mano_params"].items()}
-            for i, (cam, f, box, center, size) in enumerate(meta):
+            for i, (cam, f, box, center, size, image) in enumerate(meta):
                 go_crop = params["global_orient"][i].reshape(3, 3)
+                kp2d = center + kp[i] * size  # crop coords are in [-0.5, 0.5] of the box
                 results[cam, f] = dict(
-                    keypoints_2d=center + kp[i] * size,  # crop coords are in [-0.5, 0.5] of the box
+                    keypoints_2d=kp2d,
                     global_orient_crop=go_crop,
                     global_orient_cam=crop_rotation(s.K(cam), center) @ go_crop,
                     hand_pose=params["hand_pose"][i].reshape(15, 3, 3),
                     betas=params["betas"][i].reshape(10),
-                    box=box, box_center=center, box_size=np.float64(size))
+                    box=box, box_center=center, box_size=np.float64(size),
+                    glove_palm_joints=palm_on_glove(image, kp2d))
         return results
+
+
+def _on_glove(results: Dict[Tuple[str, int], dict]) -> Dict[Tuple[str, int], dict]:
+    return {k: r for k, r in results.items() if r["glove_palm_joints"] >= MIN_GLOVE_PALM_JOINTS}
+
+
+def _imu_hand(s: Session, rig: Rig, first: Dict[Tuple[str, int], dict], tri1: Dict[int, Optional[tuple]]
+              ) -> Dict[int, np.ndarray]:
+    """frame -> world points of the glove from the dark cluster and the glove IMU (module doc, "imu")."""
+    imu, views = {}, []
+    for f in tri1:
+        gl, g = s.glove(f), glovefit.load(s.name, f)
+        if gl is None or "R_waist_from_wrist" not in gl:
+            continue
+        imu[f] = gl["R_waist_from_wrist"]
+        if g is not None:
+            views += [(rig.T_world_from_cam(cam)[:3, :3] @ r["global_orient_cam"], g["R_wrist_from_mano"], imu[f])
+                      for (cam, ff), r in first.items() if ff == f]
+    R_world_from_waist, yaw, support = glovefit.waist_in_world(views, segment.load_table(s.name).up)
+    if R_world_from_waist is None:
+        LOGGER.warning("no pass-1 view with glove IMU and G1 (run glovefit first): no IMU boxes")
+        return {}
+    LOGGER.info("IMU waist yaw in world %.0f deg: %.0f%% of %d pass-1 views within 30 deg", yaw, 100 * support,
+                len(views))
+    out = {}
+    for f, R_waist_from_wrist in imu.items():
+        seg = segment.load(s.name, f)
+        if seg is None:
+            continue
+        anchor = tri1[f][0] if tri1[f] is not None else seg["hand_world"]
+        if len(anchor) == 0:
+            continue
+        Q = seg["dark_world"]
+        Q = Q[np.linalg.norm(Q - anchor.mean(0), axis=1) < IMU_BOX_RADIUS_M]
+        if len(Q) < segment.MIN_BOX_POINTS:
+            continue
+        h = Q @ (R_world_from_waist @ R_waist_from_wrist @ np.array([0.0, 0.0, -1.0]))
+        out[f] = Q[h > np.percentile(h, 99.5) - segment.HAND_REACH_M]  # 99.5th: robust far end
+    return out
 
 
 def run(session: str, force: bool = False) -> None:
@@ -183,27 +255,35 @@ def run(session: str, force: bool = False) -> None:
         for ci, cam in enumerate(s.cameras):
             if seg["box_valid"][ci]:
                 jobs.append((cam, f, seg["boxes"][ci]))
-    first = hamer(s, jobs)
-    LOGGER.info("pass 1 (depth boxes): %d views", len(first))
+    ran = hamer(s, jobs)
+    first = _on_glove(ran)
+    LOGGER.info("pass 1 (depth boxes): %d views, %d off the glove dropped", len(first), len(ran) - len(first))
 
-    jobs, sources = [], {}
+    tri1 = {}
     for f in todo:
         kp = {cam: r["keypoints_2d"] for (cam, ff), r in first.items() if ff == f}
-        tri = triangulate(P, kp) if len(kp) >= 2 else None
+        tri1[f] = triangulate(P, kp) if len(kp) >= 2 else None
+    glove = _imu_hand(s, rig, first, tri1)
+    LOGGER.info("IMU boxes for %d/%d frames", len(glove), len(todo))
+    jobs, sources = [], {}
+    for f in todo:
         for cam in s.cameras:
             if not s.color_path(cam, f).is_file():
                 continue
-            box = None
-            if tri is not None:
-                box = segment.project_box(s.K(cam), rig.to_cam(cam, tri[0]), (720, 1280), REBOX_MARGIN)
+            box, src = None, None
+            if f in glove:
+                box, src = segment.project_box(s.K(cam), rig.to_cam(cam, glove[f]), (720, 1280)), "imu"
+            if box is None and tri1[f] is not None:
+                box = segment.project_box(s.K(cam), rig.to_cam(cam, tri1[f][0]), (720, 1280), REBOX_MARGIN)
+                src = "triangulated"
             if box is None and (cam, f) in first:
-                box, sources[cam, f] = first[cam, f]["box"], "depth"
-            elif box is not None:
-                sources[cam, f] = "triangulated"
+                box, src = first[cam, f]["box"], "depth"
             if box is not None:
+                sources[cam, f] = src
                 jobs.append((cam, f, box))
-    second = hamer(s, jobs)
-    LOGGER.info("pass 2 (triangulated boxes): %d views", len(second))
+    ran = hamer(s, jobs)
+    second = _on_glove(ran)
+    LOGGER.info("pass 2 (triangulated boxes): %d views, %d off the glove dropped", len(second), len(ran) - len(second))
 
     for cam in s.cameras:
         (out / cam).mkdir(parents=True, exist_ok=True)

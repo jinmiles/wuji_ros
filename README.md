@@ -6,8 +6,9 @@ Wuji Glove + 4뷰 RealSense RGB-D + OptiTrack(물체) 녹화에서 오른손의 
 
 현재 상태:
 - M1(glove 브리지): 수용 기준 확인(2026-10-16, `1015-5`: 120 Hz, stamp 역행 0, delay 중앙값 약 2 ms, 단위 m). 수치는 `plan.md` M1.
-- 분석: `extract → segment → keypoints → glovefit → fit / fit4 → calib → overlay / tactile`가 첫 세션 `1015-5`에서 돈다(2026-10-16). 결과는 `docs/experiments/001_glove_hand_pose/experiments.md`에 있다.
-- 2026-10-22 물체 파지 세션(`import`로 들임)에서도 끝까지 돈다(E008). 다만 물체를 쥐고 들어 올린 구간의 손 fit은 육안으로 틀린 프레임이 있다(`docs/TODO.md`).
+- 분석: `extract → segment → glovefit → keypoints → fit / fit4 → calib → overlay / tactile`가 첫 세션 `1015-5`에서 돈다(2026-10-16). 결과는 `docs/experiments/001_glove_hand_pose/experiments.md`에 있다.
+- 2026-10-22 물체 파지 세션(`import`로 들임)에서도 끝까지 돈다(E008). 쥔 구간에서 손이 손목 유닛으로 밀리던 것은 IMU 손 방향 박스로 고쳤다(E011).
+  다만 물체를 맨손 왼손에 건네는 프레임은 아직 틀린다(`docs/TODO.md`).
 
 ## 구성
 
@@ -125,8 +126,8 @@ cd /home/user/extra_workdir/wuji_ros
 S=1015-5
 conda run --no-capture-output -n wuji_ros python scripts/run.py extract /home/user/extra_workdir/data/bags/1015-5_recovered --session $S --every 0.5
 conda run --no-capture-output -n wuji_ros python scripts/run.py segment   --session $S
-conda run --no-capture-output -n wuji_ros python scripts/run.py keypoints --session $S
 conda run --no-capture-output -n wuji_ros python scripts/run.py glovefit  --session $S
+conda run --no-capture-output -n wuji_ros python scripts/run.py keypoints --session $S   # glovefit 다음 (IMU 박스)
 conda run --no-capture-output -n wuji_ros python scripts/run.py fit       --session $S   # 카메라별 (calib 비교용)
 conda run --no-capture-output -n wuji_ros python scripts/run.py fit4      --session $S   # 4뷰 world (rig.SESSION_CALIBRATION 필요). --imu-weight 0 = 영상만
 conda run --no-capture-output -n wuji_ros python scripts/run.py calib     --session $S
@@ -149,11 +150,11 @@ conda run --no-capture-output -n wuji_ros python scripts/run.py import data/brl_
 |---|---|
 | `extract` | `data/<session>/` (레이아웃은 `docs/ARCHITECTURE.md`) |
 | `import` | `data/<session>/` (`extract`와 같은 레이아웃, frame_id는 원본 폴더 번호) |
-| `segment` | `scene/table.npz` 테이블 평면·영역, `segment/NNNNNN.npz` 뷰별 1차 박스와 depth 손 후보 |
-| `keypoints` | `keypoints/<camera>/NNNNNN.npz` HaMeR 2D, 카메라 좌표계 회전, hand_pose, betas, 박스 출처; `keypoints/triangulated/NNNNNN.npz` 3D 관절 |
+| `segment` | `scene/table.npz` 테이블 평면·영역, `segment/NNNNNN.npz` 뷰별 1차 박스, depth 손 후보, 어두운 덩어리 전체 |
+| `keypoints` | `keypoints/<camera>/NNNNNN.npz` HaMeR 2D, 카메라 좌표계 회전, hand_pose, betas, 박스 출처, 장갑 위 손바닥 관절 수; `keypoints/triangulated/NNNNNN.npz` 3D 관절. 손바닥 관절이 검은 장갑(오른손) 위에 2개 미만인 뷰는 버린다. 2차 박스는 glove IMU 손 방향으로 잡는다(G1 필요) |
 | `glovefit` | `glovefit/NNNNNN.npz` G1 hand_pose, β, `T_wrist_from_mano`, 잔차 |
 | `fit` | `fit/<camera>/NNNNNN.npz` 카메라 좌표계 V1 |
-| `fit4` | `fit4/NNNNNN.npz` world V1 (glove IMU 기울기 항 + 2D 라벨 거울 가설로 손바닥/손등 뒤집힘 처리) |
+| `fit4` | `fit4/NNNNNN.npz` world V1. glove IMU 자세 항(기울기 + 세션 yaw)과 IMU 시작점, 2D 라벨 거울 가설로 손바닥/손등 뒤집힘과 방향 튐을 처리한다. `summary.json`에 세션 yaw와 IMU 회전 오차 |
 | `calib` | `calib/report.json` 테이블 평면, 카메라별 손목 일치 |
 | `tactile` | `tactile/NNNNNN.jpg`, `tactile.mp4`, `tactile.gif`. 24×31 촉각 맵(binary 접촉 표시)과 영역별 최댓값 |
 | `overlay` | `overlay/NNNNNN.jpg`, `overlay.mp4`(H.264 yuv444p), `overlay.gif`. 카메라 위에는 손 mesh와 MANO 골격만 그린다. 재생은 추출 간격과 무관한 고정 `--fps`(프레임 순서) |

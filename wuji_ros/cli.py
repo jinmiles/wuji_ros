@@ -71,7 +71,8 @@ def build_parser() -> argparse.ArgumentParser:
     _session_args(p)
     p.add_argument("--glove-thickness-mm", type=float, default=0.0)
     p.add_argument("--imu-weight", type=float, default=100.0,
-                   help="weight of the glove IMU tilt term (0 = image-only fit; a palm/back flip costs 2x this)")
+                   help="weight of the glove IMU orientation term, tilt and session-yaw (0 = image-only fit; "
+                        "a palm/back flip costs 2x this)")
 
     p = sub.add_parser("calib", help="check the assigned calibration: table planes + per-camera hand agreement")
     p.add_argument("--session", required=True)

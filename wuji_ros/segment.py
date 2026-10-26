@@ -22,7 +22,8 @@ points hand_points(): fused depth within HAND_RADIUS_M of the triangulated HaMeR
        lies beyond the wrist joint and is excluded with it.
 
     output/<session>/scene/table.npz                 up, offset, grid origin, footprint, inner
-    output/<session>/segment/NNNNNN.npz              boxes (V,4) px, box_valid (V,), hand_world (N,3)
+    output/<session>/segment/NNNNNN.npz              boxes (V,4) px, box_valid (V,), hand_world (N,3),
+                                                     dark_world (M,3) the whole cluster (keypoints' IMU box)
 """
 
 from __future__ import annotations
@@ -187,16 +188,21 @@ def static_voxels(per_frame: List[np.ndarray]) -> set:
     return {v for v, n in counts.items() if n >= STATIC_FRACTION * len(per_frame)}
 
 
-def hand_candidate(Q: np.ndarray, table: Table, static: set) -> np.ndarray:
-    """World points of the hand by depth + RGB alone (box stage), from dark_points()."""
+def dark_cluster(Q: np.ndarray, static: set) -> np.ndarray:
+    """The largest connected cluster of dark_points() outside the static scene (glove, wrist unit, arm)."""
     if static and len(Q):
         keep = np.array([tuple(v) not in static for v in np.floor(Q / VOXEL_M).astype(np.int64)])
         Q = Q[keep]
     if len(Q) < MIN_HAND_POINTS:
         return np.zeros((0, 3))
     Q = _largest_cluster(Q)
-    if len(Q) < MIN_HAND_POINTS:
-        return np.zeros((0, 3))
+    return Q if len(Q) >= MIN_HAND_POINTS else np.zeros((0, 3))
+
+
+def hand_candidate(Q: np.ndarray, table: Table) -> np.ndarray:
+    """World points of the hand by depth + RGB alone (box stage), from dark_cluster()."""
+    if len(Q) == 0:
+        return Q
     edge = ~table.over(Q[:, :2], inner=True)
     if edge.sum() < 20:
         return Q
@@ -244,7 +250,8 @@ def run(session: str, force: bool = False) -> None:
     found = 0
     for f in s.frame_ids:
         target = out / f"{frame_name(f)}.npz"
-        hand = hand_candidate(dark[f], table, static)
+        cluster = dark_cluster(dark[f], static)
+        hand = hand_candidate(cluster, table)
         boxes = np.zeros((len(s.cameras), 4))
         valid = np.zeros(len(s.cameras), bool)
         if len(hand) >= MIN_BOX_POINTS:
@@ -255,7 +262,8 @@ def run(session: str, force: bool = False) -> None:
                 if b is not None:
                     boxes[ci], valid[ci] = b, True
             found += 1
-        np.savez(target, boxes=boxes, box_valid=valid, hand_world=hand.astype(np.float32))
+        np.savez(target, boxes=boxes, box_valid=valid, hand_world=hand.astype(np.float32),
+                 dark_world=cluster.astype(np.float32))
     (out / "summary.json").write_text(json.dumps({
         "frames": len(s.frame_ids), "with_hand": found, "static_voxels": len(static),
         "static_fraction": STATIC_FRACTION, "min_hand_points": MIN_HAND_POINTS}, indent=2) + "\n")
