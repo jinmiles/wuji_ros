@@ -203,7 +203,8 @@ EMF:                        p_wrist(t) = T_wrist_from_emftx · p_emftx(t)     # 
 
 ### M4 — 캘리브 확인 (`rig`)
 - 물체 마커를 4뷰 color에 투영한 overlay와, 테이블 평면(depth 대비 캘리브 world)을 확인한다.
-- 이상이 있으면 이후 단계로 가지 않고 보고한다. 보정값이 필요하면 캘리브 계층에 출처와 함께 둔다(물체나 손 상수에 흡수하지 않는다).
+- 이상이 있으면 이후 단계로 가지 않고 수치로 보고만 한다.
+- 카메라 파라미터(`calibration/`의 `w2c_ext`·`mocap2cam`, 세션 intrinsics)는 읽기만 한다. 고치지도, 다시 추정하지도, 물체나 손 상수에 흡수하지도 않는다(사용자 결정 2026-10-27).
 
 ### M5 — HaMeR 2D + 손 점군 (`keypoints`, `segment`)
 - HaMeR에 넣을 손 박스:

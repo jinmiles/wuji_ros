@@ -114,7 +114,12 @@ output/<session>/<stage>/...         # 단계별 결과, 재실행 시 재사용
 
 ### 캘리브 `calibration/20261015/` (2026-10-16 전달)
 
-- 형식은 `20260824_v2`와 같다(`w2c_ext.npz` 3×4 `T_cam_from_world`). `mocap2cam`은 없다.
+- 형식은 `20260824_v2`와 같다(`w2c_ext.npz` 3×4 `T_cam_from_world`).
+- `mocap2cam.npy`(4×4 `T_cam1_from_mocap`, m)는 연구실 파일이다. 2026-10-26 16:47 KST에 사용자가 두었고, sha256은 `2665c92b…c169`다. 추정한 값이 아니다.
+  `T_world_from_mocap = T_world_from_cam1 · T_cam1_from_mocap`이라 camera1을 거쳐서만 들어간다.
+  `provenance.json`의 `mocap2cam` 항목은 전달 전 문구("not delivered")로 남아 있다.
+- **카메라 파라미터는 읽기만 한다**(사용자 결정 2026-10-27). 대상은 `calibration/`의 파일과 세션 `intrinsics.json`이다. 어긋나면 수치로 보고만 하고 고치지 않는다.
+  보고된 어긋남은 `docs/TODO.md`에 있다. `20261022_163051` 물체 투영에서 camera1은 맞고 camera2–4는 어긋난다.
 - **world**: 카메라 중심 z가 −0.57 ~ −0.88 m라서 z-DOWN이다.
   **테이블 면은 world z에서 12.3° 기울어 있다**(4뷰 RANSAC). 보드가 테이블에 평평하게 놓이지 않은 상태로 캘리브된 것으로 보인다. 그래서 "위쪽"과 "중력"은 world z가 아니라 측정한 테이블 법선(`segment.Table.up`)으로 정한다. IMU 검증은 테이블이 수평이라고 가정한다.
 - 확인 결과는 `calibration/20261015/provenance.json`과 `docs/TODO_completed.md`에 있다.
