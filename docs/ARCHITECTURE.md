@@ -10,14 +10,14 @@
 extract → segment(table, depth+RGB box) → G1 → keypoints(HaMeR, IMU 손 방향으로 재박스) → V1(fit4, 4뷰 world) → calib check → overlay / tactile
 ```
 
-계획의 순서(`extract → calib check → keypoints → segment → G1 → shape → V1 → V2 → evaluate`)와 다른 점: 손 박스가 HaMeR 전에 필요해 `segment`가 앞에 오고, 2차 박스가 glove IMU의 world 자세(G1 필요)를 써서 G1이 `keypoints` 앞에 온다. β는 아직 G1에서 푼다. V2와 evaluate는 아직 없다.
+계획의 순서(`extract → calib check → keypoints → segment → G1 → shape → V1 → evaluate`)와 다른 점: 손 박스가 HaMeR 전에 필요해 `segment`가 앞에 오고, 2차 박스가 glove IMU의 world 자세(G1 필요)를 써서 G1이 `keypoints` 앞에 온다. β는 기본으로 G1 값을 쓴다. 영상 β는 `fit4 --shape image` 옵션이다(plan.md §6 16). evaluate는 아직 없다.
 
 ```
 ```
 
 - G1: glove 관절을 MANO 관절각으로 변환한다(손목 좌표계, world 없음).
 - V1: 손가락 관절을 G1 값으로 고정하고, 손 전체의 world 6D를 4뷰 RGB-D로 맞춘다.
-- V2: 손가락 관절을 G1 값에서 너무 벗어나지 않게 미세조정한다.
+- 영상으로 손가락 관절을 다시 맞추는 단계(V2)는 없다(사용자 결정 2026-10-27, plan.md §6 15). `fit4`의 손가락은 G1 값 그대로다.
 - 대체 경로(예: 관절각을 HaMeR로 추정)는 비교 실험용이다. 기본 경로로 바꾸려면 명시적 요청이 있어야 한다.
 
 ## 모듈
@@ -34,7 +34,7 @@ extract → segment(table, depth+RGB box) → G1 → keypoints(HaMeR, IMU 손 �
 | `wuji_ros/segment.py` | 테이블 평면·영역, depth + RGB 손 후보와 1차 박스, 삼각측량 골격 주변 손 점군 `hand_points` (구현됨) |
 | `wuji_ros/mano.py` | MANO forward, OpenPose-21 관절 순서 (구현됨) |
 | `wuji_ros/glovefit.py` | G1, glove IMU 자세의 world 변환(`waist_in_world`, `keypoints`·`fit4` 공용) (구현됨) |
-| `wuji_ros/handfit.py` | V1 카메라별(`fit`)과 4뷰 world(`fit4`) (구현됨). `fit4`는 glove 융합 IMU 자세 항(기울기 + 세션 yaw, 기본 가중치 100)과 IMU 시작점, 2D 라벨 거울 가설(손바닥/손등 뒤집힘 대응)을 쓴다. β는 현재 G1에서 푼다. V2는 아직 없음 |
+| `wuji_ros/handfit.py` | V1 카메라별(`fit`)과 4뷰 world(`fit4`) (구현됨). `fit4`는 glove 융합 IMU 자세 항(기울기 + 세션 yaw, 기본 가중치 100)과 IMU 시작점, 2D 라벨 거울 가설(손바닥/손등 뒤집힘 대응)을 쓴다. β(손 크기)는 기본으로 G1 β다(`--shape glove`, 2026-10-27). `--shape image`는 세션의 모든 프레임으로 β 하나를 영상으로 푼다. 카메라별 `fit`은 늘 G1 β다. V2(손가락 미세조정)는 하지 않는다 |
 | `wuji_ros/viz.py` | 카메라 overlay(손 mesh + MANO 골격만), 촉각 맵 별도 시퀀스, 각각 H.264(yuv444p) mp4 + gif (구현됨) |
 | `wuji_ros/evaluate.py` | 일치도 지표, 프레임별 라벨 |
 | `wuji_ros/cli.py`, `scripts/run.py` | 분석 entrypoint, 단계별 subcommand, `--force` (구현됨) |

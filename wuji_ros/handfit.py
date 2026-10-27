@@ -198,6 +198,7 @@ def load(session: str, cam: str, frame_id: int):
 
 
 IMU_WEIGHT = 100.0  # fit4 IMU term: a palm/back flip costs 2x this, a 4 deg error 0.24; 50 left f73 flipped
+W_BETA = 1.0  # fit4 shape prior sum(beta^2), against the mean per-frame loss (median 134 on 20261022_163051, E012)
 # HaMeR's 2D under a palm/back flip: thumb <-> pinky and index <-> ring swap places
 # (a right hand palm-up seen from above has the outline of a right hand palm-down
 # mirrored). OpenPose-21: thumb 1-4, index 5-8, middle 9-12, ring 13-16, pinky 17-20.
@@ -205,7 +206,7 @@ MIRROR_LABELS = [0, 17, 18, 19, 20, 13, 14, 15, 16, 9, 10, 11, 12, 5, 6, 7, 8, 1
 
 
 def run_world(session: str, glove_thickness_m: float = 0.0, imu_weight: float = IMU_WEIGHT,
-              force: bool = False) -> None:
+              shape: str = "glove", force: bool = False) -> None:
     """V1 over all views at once, in the world of the session's calibration (plan.md M7).
 
     Same model and losses as `run`, summed over the views HaMeR ran in: reprojection
@@ -234,8 +235,17 @@ def run_world(session: str, glove_thickness_m: float = 0.0, imu_weight: float = 
     nothing. imu_weight = 0 is the image-only fit, without the IMU start; only then are
     gravity_err_deg and imu_rot_err_deg independent checks.
 
+    Hand size (plan.md §6 16): shape "glove" (default) keeps glovefit's beta, i.e. the
+    glove's bone lengths. Shape "image" fits one beta for the session from the images.
+    The candidates above are solved with glovefit's beta. Then beta and every frame's
+    pose are solved together, starting from each frame's winner, under the same losses
+    plus W_BETA * |beta|^2. Last, the candidates are solved again with that beta.
+    The finger pose stays the glove's either way.
+    The depth points are the glove's surface, so with glove_thickness_m = 0 the image beta
+    includes the glove. T_world_from_wrist keeps glovefit's r_wrist <-> MANO alignment.
+
         output/<session>/fit4/NNNNNN.npz   R_world_from_mano, wrist_world, T_world_from_wrist (4,4)
-            (the glove's r_wrist frame, for its taxels and skeleton), joints_world (21,3),
+            (the glove's r_wrist frame, for its taxels and skeleton), betas (10,), joints_world (21,3),
             verts_world (778,3), views, reproj_px (V,21), surface_mm_median, start_camera
             (the HaMeR view whose orientation started the winner, or "imu"), start_flipped,
             labels_mirrored (the winner used MIRROR_LABELS), gravity_err_deg
@@ -310,16 +320,21 @@ def run_world(session: str, glove_thickness_m: float = 0.0, imu_weight: float = 
                 100 * yaw_support, len(imu_views))
 
     eye = torch.eye(3, device=dev)
-    betas = torch.tensor(gfit[0]["betas"], dtype=torch.float32, device=dev).expand(B, 10)
     theta = torch.tensor(np.stack([g["hand_pose"] for g in gfit]), dtype=torch.float32, device=dev)
-    with torch.no_grad():
-        Vm, Jm = mano(betas, eye.expand(B, 3, 3), theta, torch.zeros(B, 3, device=dev))
+
+    def hand(beta):
+        """MANO(beta, theta_glove) per frame: joints, and vertices pushed out by the glove thickness."""
+        Vm, Jm = mano(beta.expand(B, 10), eye.expand(B, 3, 3), theta, torch.zeros(B, 3, device=dev))
         tri = Vm[:, faces]
         fn = torch.cross(tri[:, :, 1] - tri[:, :, 0], tri[:, :, 2] - tri[:, :, 0], dim=-1)
         vn = torch.nn.functional.normalize(
             torch.zeros_like(Vm).index_add_(1, faces.reshape(-1), fn.repeat_interleave(3, dim=1)), dim=-1)
-        Vs = Vm + glove_thickness_m * vn
-    J0 = Jm[:, :1]
+        return Jm, Vm + glove_thickness_m * vn
+
+    beta_glove = np.asarray(gfit[0]["betas"], dtype=np.float32)
+    beta = torch.tensor(beta_glove, device=dev)
+    with torch.no_grad():
+        Jm, Vs = hand(beta)
     axis = torch.nn.functional.normalize(Jm[:, 9] - Jm[:, 0], dim=-1)
     flip = rotmat(np.pi * axis)
 
@@ -350,50 +365,88 @@ def run_world(session: str, glove_thickness_m: float = 0.0, imu_weight: float = 
     for i, p in enumerate(clouds):
         P[i, :len(p)] = torch.tensor(p, dtype=torch.float32, device=dev)
         Pm[i, :len(p)] = 1.0
-    Jl, Vl, Pl, Pml = (Jm - J0)[idx], (Vs - J0)[idx], P[idx], Pm[idx]
+    Pl, Pml = P[idx], Pm[idx]
     Ri = torch.tensor(np.stack([np.eye(3) if r is None else r for r in R_imu]), dtype=torch.float32, device=dev)[idx]
     Hi = torch.tensor([r is not None for r in R_imu], dtype=torch.float32, device=dev)[idx]
 
-    def solve(sl):
-        w = torch.zeros(sl.stop - sl.start, 3, device=dev, requires_grad=True)
-        c = c0[sl].clone().requires_grad_(True)
-        opt = torch.optim.Adam([{"params": [w], "lr": 0.01}, {"params": [c], "lr": 0.002}])
+    def losses(R, c, Jl, Vl, target, vmk, P, Pm, Ri, Hi):
+        """Hand rotation R and wrist c in world, MANO joints/vertices relative to the wrist."""
+        Jw = torch.einsum("bij,bkj->bki", R, Jl) + c[:, None]
+        Vw = torch.einsum("bij,bkj->bki", R, Vl) + c[:, None]
+        Jc = torch.einsum("vij,bkj->bvki", Tcw[:, :3, :3], Jw) + Tcw[None, :, None, :3, 3]
+        uv = torch.einsum("vij,bvkj->bvki", Ks, Jc)
+        uv = uv[..., :2] / uv[..., 2:].clamp(min=1e-3)
+        rep = torch.nn.functional.huber_loss(uv, target, delta=HUBER_PX, reduction="none").sum(-1).mean(-1)
+        rep = (rep * vmk).sum(1) / vmk.sum(1)
+        dmin = torch.cdist(P, Vw).min(-1).values * 1e3
+        srf = torch.nn.functional.huber_loss(dmin, torch.zeros_like(dmin), delta=HUBER_MM, reduction="none")
+        srf = (srf * Pm).sum(1) / Pm.sum(1).clamp(min=1)
+        # 1 - cos of the rotation between fit and IMU, (3 - tr(R^T R_imu)) / 2; 0 where no IMU
+        imu = imu_weight * Hi * (3 - (R * Ri).sum((-2, -1))) / 2
+        return Jw, Vw, uv, dmin, rep + srf, imu
 
-        def losses():
-            R = torch.einsum("bij,bjk->bik", R_start[sl], rotmat(w))
-            Jw = torch.einsum("bij,bkj->bki", R, Jl[sl]) + c[:, None]
-            Vw = torch.einsum("bij,bkj->bki", R, Vl[sl]) + c[:, None]
-            Jc = torch.einsum("vij,bkj->bvki", Tcw[:, :3, :3], Jw) + Tcw[None, :, None, :3, 3]
-            uv = torch.einsum("vij,bvkj->bvki", Ks, Jc)
-            uv = uv[..., :2] / uv[..., 2:].clamp(min=1e-3)
-            rep = torch.nn.functional.huber_loss(uv, target[sl], delta=HUBER_PX, reduction="none").sum(-1).mean(-1)
-            rep = (rep * vmk[sl]).sum(1) / vmk[sl].sum(1)
-            dmin = torch.cdist(Pl[sl], Vw).min(-1).values * 1e3
-            srf = torch.nn.functional.huber_loss(dmin, torch.zeros_like(dmin), delta=HUBER_MM, reduction="none")
-            srf = (srf * Pml[sl]).sum(1) / Pml[sl].sum(1).clamp(min=1)
-            # 1 - cos of the rotation between fit and IMU, (3 - tr(R^T R_imu)) / 2; 0 where no IMU
-            imu = imu_weight * Hi[sl] * (3 - (R * Ri[sl]).sum((-2, -1))) / 2
-            return R, Jw, Vw, uv, dmin, rep + srf, imu
+    def solve_candidates(Jm, Vs):
+        """Every candidate from its start with MANO fixed -> (R, Jw, Vw, uv, dmin, image loss, imu loss), each
+        frame's winning candidate (lowest total loss)."""
+        J0 = Jm[:, :1]
+        Jl, Vl = (Jm - J0)[idx], (Vs - J0)[idx]
 
+        def solve(sl):
+            w = torch.zeros(sl.stop - sl.start, 3, device=dev, requires_grad=True)
+            c = c0[sl].clone().requires_grad_(True)
+            opt = torch.optim.Adam([{"params": [w], "lr": 0.01}, {"params": [c], "lr": 0.002}])
+
+            def step():
+                R = torch.einsum("bij,bjk->bik", R_start[sl], rotmat(w))
+                return (R,) + losses(R, c, Jl[sl], Vl[sl], target[sl], vmk[sl], Pl[sl], Pml[sl], Ri[sl], Hi[sl])
+
+            for _ in range(ITERS):
+                opt.zero_grad()
+                out_ = step()
+                (out_[5] + out_[6]).sum().backward()
+                opt.step()
+            with torch.no_grad():
+                return [x.detach() for x in step()]
+
+        parts = [solve(slice(a, min(a + CHUNK, N))) for a in range(0, N, CHUNK)]
+        res = [torch.cat([p[k] for p in parts]) for k in range(7)]
+        loss_np = (res[5] + res[6]).cpu().numpy()
+        return res, [min((n for n in range(N) if cand[n][0] == i), key=lambda n: loss_np[n]) for i in range(B)]
+
+    def solve_shape(R0, wrist0, win):
+        """One beta for the session, solved with every frame's rotation and wrist from its winner."""
+        b = beta.clone().requires_grad_(True)
+        w = torch.zeros(B, 3, device=dev, requires_grad=True)
+        c = wrist0.clone().requires_grad_(True)
+        opt = torch.optim.Adam([{"params": [w], "lr": 0.01}, {"params": [c], "lr": 0.002}, {"params": [b], "lr": 0.01}])
         for _ in range(ITERS):
             opt.zero_grad()
-            out_ = losses()
-            (out_[5] + out_[6]).sum().backward()
+            Jm_, Vs_ = hand(b)
+            J0_ = Jm_[:, :1]
+            R = torch.einsum("bij,bjk->bik", R0, rotmat(w))
+            out_ = losses(R, c, Jm_ - J0_, Vs_ - J0_, target[win], vmk[win], P, Pm, Ri[win], Hi[win])
+            ((out_[4] + out_[5]).mean() + W_BETA * (b ** 2).sum()).backward()
             opt.step()
-        with torch.no_grad():
-            return [x.detach() for x in losses()]
+        return b.detach()
 
-    parts = [solve(slice(a, min(a + CHUNK, N))) for a in range(0, N, CHUNK)]
-    R, Jw, Vw, uv, dmin, img_loss, imu_loss = (torch.cat([p[k] for p in parts]) for k in range(7))
-    loss = img_loss + imu_loss
+    res, winners = solve_candidates(Jm, Vs)
+    if shape == "image":
+        win = torch.tensor(winners, device=dev)
+        beta = solve_shape(res[0][win], res[1][win, 0], win)
+        with torch.no_grad():
+            Jm, Vs = hand(beta)
+        LOGGER.info("shape from %d frames: beta %s (glove %s)", B, np.round(beta.cpu().numpy(), 2),
+                    np.round(beta_glove, 2))
+        res, winners = solve_candidates(Jm, Vs)
+    R, Jw, Vw, uv, dmin, img_loss, imu_loss = res
+    J0 = Jm[:, :1]
+    beta_np = beta.cpu().numpy()
 
     out.mkdir(parents=True, exist_ok=True)
-    loss_np = loss.cpu().numpy()
     img_np, imu_np = img_loss.cpu().numpy(), imu_loss.cpu().numpy()
     rep_all, srf_all, grav_all, rot_all, flips, mirrored, imu_starts = [], [], [], [], 0, 0, 0
     for i, f in enumerate(frames):
-        mine = [n for n in range(N) if cand[n][0] == i]
-        best = min(mine, key=lambda n: loss_np[n])
+        best = winners[i]
         Rb = R[best].cpu().numpy()
         views = [cams[v] for v in range(V) if vmask[i][v]]
         tgt = targets[i][:, MIRROR_LABELS] if cand[best][5] else targets[i]
@@ -415,7 +468,7 @@ def run_world(session: str, glove_thickness_m: float = 0.0, imu_weight: float = 
         T_ww[:3, :3] = Rb @ R_g.T
         T_ww[:3, 3] = Jw[best, 0].cpu().numpy() - Rb @ J0[i, 0].cpu().numpy() - Rb @ R_g.T @ t_g
         np.savez(out / f"{frame_name(f)}.npz", R_world_from_mano=Rb, wrist_world=Jw[best, 0].cpu().numpy(),
-                 T_world_from_wrist=T_ww,
+                 T_world_from_wrist=T_ww, betas=beta_np,
                  joints_world=Jw[best].cpu().numpy(), verts_world=Vw[best].cpu().numpy().astype(np.float32),
                  views=np.array(views), reproj_px=reproj, surface_mm_median=surf,
                  start_camera=cams[cand[best][3]] if cand[best][3] >= 0 else "imu", start_flipped=int(cand[best][4]),
@@ -432,7 +485,8 @@ def run_world(session: str, glove_thickness_m: float = 0.0, imu_weight: float = 
     g, r = np.array(grav_all), np.array(rot_all)
     summary = {
         "calibration": rig.name, "glove_thickness_m": glove_thickness_m, "imu_weight": imu_weight,
-        "imu_in_loss": imu_weight > 0, "frames": B, "flipped_start_chosen": flips, "labels_mirrored_frames": mirrored,
+        "imu_in_loss": imu_weight > 0, "shape": shape, "betas": beta_np.round(4).tolist(),
+        "betas_glove": beta_glove.round(4).tolist(), "frames": B, "flipped_start_chosen": flips, "labels_mirrored_frames": mirrored,
         "imu_start_chosen": imu_starts,
         "reproj_px_median": float(np.median(rep_all)), "surface_mm_median": float(np.nanmedian(srf_all)),
         "gravity_err_deg_median": float(np.nanmedian(g)), "gravity_err_deg_p90": float(np.nanpercentile(g, 90)),
