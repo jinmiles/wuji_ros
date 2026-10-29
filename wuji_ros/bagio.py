@@ -357,7 +357,7 @@ def extract(bag_path: Path, session: Optional[str] = None, every_s: float = 0.5,
         "camera_color_dt_ms": {"median": float(np.median(color_dt)), "max": float(np.max(color_dt))} if color_dt else None,
         "topics_without_messages": empty, "tf_static": tf_static,
         "glove_info": json.loads(info_msg.data) if info_msg is not None else None,
-        "calibration": None,  # set by the calib stage once a calibration is assigned
+        "calibration": None,  # set by annotate.py once a calibration is assigned (rig.rig_for)
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     LOGGER.info("%s: %d frames, missing %s, other cameras vs master median %.1f ms",
@@ -540,7 +540,7 @@ def import_dir(src: Path, camera_config: Path, session: Optional[str] = None, ev
         "source_capture_config": (json.loads((src / "capture_config.json").read_text())
                                   if (src / "capture_config.json").is_file() else None),
         "tf_static": tf_static, "glove_info": info,
-        "calibration": None,  # set by the calib stage once a calibration is assigned
+        "calibration": None,  # set by annotate.py once a calibration is assigned (rig.rig_for)
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     LOGGER.info("%s: %d frames, missing %s, other cameras vs master median %.1f ms",

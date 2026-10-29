@@ -5,16 +5,19 @@ T_cam_from_world (x_cam = R x_world + t). Intrinsics come from the session's own
 camera_info (data/<session>/<camera>/intrinsics.json), never from the calibration.
 
 Which calibration a session was recorded under is recorded here, with how it was
-established; a session without an entry has no world frame and runs per camera.
+established, or else in data/<session>/manifest.json "calibration" (written by annotate.py from an
+exact w2c_ext.npz match or an explicit choice). A session with neither has no world frame and runs
+per camera.
 """
 
 from __future__ import annotations
 
+import json
 from typing import Dict, Optional
 
 import numpy as np
 
-from .paths import CALIBRATION_DIR, CAMERAS
+from .paths import CALIBRATION_DIR, CAMERAS, session_dir
 
 # session -> calibration name. Measured, not assumed: see docs/ARCHITECTURE.md.
 SESSION_CALIBRATION: Dict[str, str] = {
@@ -56,4 +59,7 @@ class Rig:
 
 def rig_for(session: str) -> Optional[Rig]:
     name = SESSION_CALIBRATION.get(session)
+    manifest = session_dir(session) / "manifest.json"
+    if name is None and manifest.is_file():
+        name = json.loads(manifest.read_text()).get("calibration")
     return Rig(name) if name else None

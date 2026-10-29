@@ -13,6 +13,7 @@ Stages and their environments (README "환경"):
     overlay    MANO mesh + skeleton in every view        wuji_ros
                (+ the mocap-posed object: overlay_object)
     tactile    glove tactile map per frame               wuji_ros
+    annotate   one recording folder -> all of the above up to contact, every overlay
 """
 
 from __future__ import annotations
@@ -57,6 +58,19 @@ def build_parser() -> argparse.ArgumentParser:
                    help="index: keep every stream of the collector's row (offsets still in metadata.csv); "
                         "stamp: leave out streams beyond 17 ms (cameras) / 10 ms (glove, mocap) of camera1 color")
     p.add_argument("--force", action="store_true")
+
+    p = sub.add_parser("annotate", help="one recording folder -> import, segment, glovefit, keypoints, fit4, contact, "
+                                        "overlay (hand / + object / contact hand + object), tactile")
+    p.add_argument("src", type=Path, help="recording folder (image_metadata.csv, camera*/, wuji/, mocap/)")
+    p.add_argument("--camera-config", type=Path, default=None,
+                   help="collector's rerun yaml (intrinsics + object marker offsets); default: the only *.yaml next "
+                        "to the folder")
+    p.add_argument("--object-mesh", type=Path, default=None, help="default: the only *.stl next to the folder")
+    p.add_argument("--calibration", default=None,
+                   help="calibration/<name>; default: rig.SESSION_CALIBRATION, else the calibration whose w2c_ext.npz "
+                        "is byte-identical to the one delivered with the recording (never estimated)")
+    p.add_argument("--every", type=float, default=DEFAULT_EVERY_S, help="seconds between imported frames")
+    p.add_argument("--force", action="store_true", help="regenerate every stage")
 
     p = sub.add_parser("segment", help="table footprint + per-view hand boxes from calibrated depth and RGB")
     _session_args(p)
@@ -121,6 +135,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         from .bagio import import_dir
         import_dir(args.src, args.camera_config, session=args.session, every_s=args.every, start_s=args.start,
                    end_s=args.end, align=args.align, force=args.force)
+    elif args.command == "annotate":
+        from .annotate import run
+        run(args.src, camera_config=args.camera_config, object_mesh=args.object_mesh, calibration=args.calibration,
+            every_s=args.every, force=args.force)
     elif args.command == "segment":
         from .segment import run
         run(args.session, force=args.force)

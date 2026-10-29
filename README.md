@@ -15,7 +15,7 @@ Wuji Glove + 4뷰 RealSense RGB-D + OptiTrack(물체) 녹화에서 오른손의 
 | 경로 | 내용 |
 |---|---|
 | `plan.md` | 목표, 마일스톤, 완료 조건, 결정 사항 |
-| `ANNOTATION.md` | 녹화 폴더 → 물체에 닿게 보정한 손(`contact`)까지의 입력 위치, 명령, 결과 키 |
+| `ANNOTATION.md`, `annotate.sh` | 녹화 폴더 하나 → 물체에 닿게 보정한 손(`contact`)과 오버레이 전부. 입력 위치, 명령, 결과 키 |
 | `RECORDING.md` | 녹화 PC 운영 절차 (설치, 네트워크, 캘리브레이션, 녹화, 문제 해결) |
 | `docs/` | 구조(`ARCHITECTURE.md`), 미해결 항목(`TODO.md`), 실험 기록(`experiments/`) |
 | `calibration/<name>/` | 리그 캘리브 파일 (커밋, GT라서 읽기만 한다). 현재 `20261015`: 사용자가 올린 `w2c_ext.npz`, `t2r_ext.npz`, `mocap2cam.npy`만 둔다(2026-10-29) |
@@ -120,7 +120,7 @@ ln -sfn /home/user/wj/hamer_data/_DATA/data/mano_mean_params.npz assets/hamer/da
 
 ## 분석 파이프라인
 
-녹화 폴더에서 물체에 닿게 보정한 손(`contact`)까지 만드는 공유용 안내(입력 위치, 명령, 결과 키)는 [ANNOTATION.md](ANNOTATION.md)에 있다.
+녹화 폴더 하나에서 물체에 닿게 보정한 손(`contact`)과 오버레이를 모두 만드는 명령은 `./annotate.sh <녹화 폴더>`(= `scripts/run.py annotate`)다. 입력 위치와 결과 키는 [ANNOTATION.md](ANNOTATION.md)에 있다. 캘리브는 `--calibration`, `rig.SESSION_CALIBRATION`, 녹화와 같이 온 `w2c_ext.npz`와 sha256이 같은 `calibration/<이름>` 순서로 정하고 `data/<세션>/manifest.json`에 남긴다(추정하지 않음).
 
 stage마다 출력이 있으면 재사용하고, `--force`로 다시 만든다(`--force`이면 그 stage 출력을 비우고 시작한다). 모두 env `wuji_ros`에서 돈다. `segment`부터는 세션의 캘리브(`wuji_ros/rig.py: SESSION_CALIBRATION`)가 필요하다.
 
@@ -162,7 +162,7 @@ conda run --no-capture-output -n wuji_ros python scripts/run.py import data/brl_
 | `extract` | `data/<session>/` (레이아웃은 `docs/ARCHITECTURE.md`) |
 | `import` | `data/<session>/` (`extract`와 같은 레이아웃, frame_id는 원본 폴더 번호) |
 | `segment` | `scene/table.npz` 테이블 평면·영역, `segment/NNNNNN.npz` 뷰별 1차 박스, depth 손 후보, 어두운 덩어리 전체 |
-| `keypoints` | `keypoints/<camera>/NNNNNN.npz` HaMeR 2D, 카메라 좌표계 회전, hand_pose, betas, 박스 출처, 장갑 위 손바닥 관절 수; `keypoints/triangulated/NNNNNN.npz` 3D 관절. 손바닥 관절이 검은 장갑(오른손) 위에 2개 미만인 뷰는 버린다. 2차 박스는 glove IMU 손 방향으로 잡는다(G1 필요) |
+| `keypoints` | `keypoints/<camera>/NNNNNN.npz` HaMeR 2D, 카메라 좌표계 회전, hand_pose, betas, 박스 출처, 장갑 위 손바닥 관절 수; `keypoints/triangulated/NNNNNN.npz` 3D 관절. 손바닥 관절이 검은 장갑(오른손) 위에 2개 미만인 뷰는 버린다. 2차 박스는 glove IMU 손 방향으로 잡는다(G1 필요). `summary.json`이 있으면 건너뛰고, 없으면 모든 프레임을 다시 돈다(세션 IMU yaw를 모든 프레임에서 구하므로 이어 돌리기 없음) |
 | `glovefit` | `glovefit/NNNNNN.npz` G1 hand_pose, β, `T_wrist_from_mano`, 잔차 |
 | `fit` | `fit/<camera>/NNNNNN.npz` 카메라 좌표계 V1 |
 | `fit4` | `fit4/NNNNNN.npz` world V1. glove IMU 자세 항(기울기 + 세션 yaw)과 IMU 시작점, 2D 라벨 거울 가설로 손바닥/손등 뒤집힘과 방향 튐을 처리한다. 손 크기 β와 손가락 자세는 기본으로 G1(장갑) 값이다. `--shape image`는 세션의 모든 프레임으로 β 하나를 영상(2D + depth)으로 푼다. `summary.json`에 β, 세션 yaw, IMU 회전 오차 |

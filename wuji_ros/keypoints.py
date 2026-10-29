@@ -39,10 +39,12 @@ full-image pixels.
         box (4,), box_center (2,), box_size, box_source ("imu" | "triangulated" | "depth"), glove_palm_joints
     output/<session>/keypoints/triangulated/NNNNNN.npz
         joints_world (21,3), views (str), residual_px (V,) median per used view
+    output/<session>/keypoints/summary.json   frames, triangulated, views per pass (the stage is done)
 """
 
 from __future__ import annotations
 
+import json
 import shutil
 import sys
 from typing import Dict, List, Optional, Tuple
@@ -238,12 +240,15 @@ def run(session: str, force: bool = False) -> None:
         raise SystemExit(f"{session}: no calibration assigned (rig.SESSION_CALIBRATION)")
     out = stage_dir(session, "keypoints")
     tri_dir = out / "triangulated"
-    if force and out.is_dir():
-        shutil.rmtree(out)  # a frame that fails now must not keep its earlier result
-    todo = [f for f in s.frame_ids if force or not (tri_dir / f"{frame_name(f)}.npz").is_file()]
-    LOGGER.info("%s: %d frames to run", session, len(todo))
-    if not todo:
+    if (out / "summary.json").is_file() and not force:
+        LOGGER.info("%s exists, skipping (use --force)", out)
         return
+    if out.is_dir():
+        # every frame at once, never a resume: the session's IMU yaw for the pass-2 boxes (_imu_hand) comes
+        # from all frames' pass-1 views, and a frame that fails now must not keep an earlier result
+        shutil.rmtree(out)
+    todo = list(s.frame_ids)
+    LOGGER.info("%s: %d frames to run", session, len(todo))
     P = {c: s.K(c) @ rig.T_cam_from_world[c][:3] for c in s.cameras}
     hamer = _Hamer()
 
@@ -302,6 +307,8 @@ def run(session: str, force: bool = False) -> None:
             np.savez(tri_dir / f"{frame_name(f)}.npz", joints_world=tri[0], views=np.array(tri[1]), residual_px=tri[2])
             n_tri += 1
     LOGGER.info("%s: triangulated %d/%d frames", session, n_tri, len(todo))
+    (out / "summary.json").write_text(json.dumps({"frames": len(todo), "triangulated": n_tri, "pass1_views": len(first),
+                                                  "pass2_views": len(second), "imu_boxes": len(glove)}, indent=2) + "\n")
 
 
 def load_triangulated(session: str, frame_id: int) -> Optional[Dict[str, np.ndarray]]:
