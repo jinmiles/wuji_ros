@@ -7,7 +7,7 @@
 녹화 PC에서 브리지로 bag을 기록하고, 분석 서버에서 다음 순서로 처리한다.
 
 ```
-extract → segment(table, depth+RGB box) → G1 → keypoints(HaMeR, IMU 손 방향으로 재박스) → V1(fit4, 4뷰 world) → calib check → overlay / tactile
+extract → segment(table, depth+RGB box) → G1 → keypoints(HaMeR, IMU 손 방향으로 재박스) → V1(fit4, 4뷰 world) → contact(물체를 쥔 프레임의 손 위치) → calib check → overlay / tactile
 ```
 
 계획의 순서(`extract → calib check → keypoints → segment → G1 → shape → V1 → evaluate`)와 다른 점: 손 박스가 HaMeR 전에 필요해 `segment`가 앞에 오고, 2차 박스가 glove IMU의 world 자세(G1 필요)를 써서 G1이 `keypoints` 앞에 온다. β는 기본으로 G1 값을 쓴다. 영상 β는 `fit4 --shape image` 옵션이다(plan.md §6 16). evaluate는 아직 없다.
@@ -35,6 +35,7 @@ extract → segment(table, depth+RGB box) → G1 → keypoints(HaMeR, IMU 손 �
 | `wuji_ros/mano.py` | MANO forward, OpenPose-21 관절 순서 (구현됨) |
 | `wuji_ros/glovefit.py` | G1, glove IMU 자세의 world 변환(`waist_in_world`, `keypoints`·`fit4` 공용) (구현됨) |
 | `wuji_ros/handfit.py` | V1 카메라별(`fit`)과 4뷰 world(`fit4`) (구현됨). `fit4`는 glove 융합 IMU 자세 항(기울기 + 세션 yaw, 기본 가중치 100)과 IMU 시작점, 2D 라벨 거울 가설(손바닥/손등 뒤집힘 대응)을 쓴다. β(손 크기)는 기본으로 G1 β다(`--shape glove`, 2026-10-27). `--shape image`는 세션의 모든 프레임으로 β 하나를 영상으로 푼다. 카메라별 `fit`은 늘 G1 β다. V2(손가락 미세조정)는 하지 않는다 |
+| `wuji_ros/contactfit.py` | stage `contact`(plan.md §6 18): 물체를 쥔 프레임에서 `fit4` 손을 위치만 옮겨, 물체에 닿고 관통하지 않게 하는 가장 작은 이동을 구한다. 손가락·β·회전은 그대로다. 물체 mesh의 정확한 부호 거리(점-삼각형 거리, 일반화 winding number 부호)를 몸체마다 구해 최솟값을 쓴다. 안쪽으로 감긴 몸체(속이 빈 기둥의 내벽)는 뺀다. 물체 자세가 solver 입력이므로 독립 검증은 재투영과 depth 표면이다 (구현됨, 2026-10-29) |
 | `wuji_ros/objectpose.py` | mocap 물체 자세: 수집기 yaml의 `marker_offsets`(OBJ 좌표, 마커 이름으로 대응)를 기록된 마커에 Kabsch로 맞춘 `T_mocap_from_obj`, STL mesh (구현됨, 2026-10-29). M5 물체 점 제거와 M9 관통·접촉에서 다시 쓴다 |
 | `wuji_ros/viz.py` | 카메라 overlay(손 mesh + MANO 골격), `--object-config/--object-mesh`이면 mocap 물체 mesh도 같은 깊이 순서로 그려 `overlay_object/`에 둔다. 촉각 맵 별도 시퀀스. 각각 H.264(yuv444p) mp4 + gif (구현됨) |
 | `wuji_ros/evaluate.py` | 일치도 지표, 프레임별 라벨 |

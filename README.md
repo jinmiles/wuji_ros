@@ -130,6 +130,8 @@ conda run --no-capture-output -n wuji_ros python scripts/run.py glovefit  --sess
 conda run --no-capture-output -n wuji_ros python scripts/run.py keypoints --session $S   # glovefit 다음 (IMU 박스)
 conda run --no-capture-output -n wuji_ros python scripts/run.py fit       --session $S   # 카메라별 (calib 비교용)
 conda run --no-capture-output -n wuji_ros python scripts/run.py fit4      --session $S   # 4뷰 world (rig.SESSION_CALIBRATION 필요). --imu-weight 0 = 영상만, --shape image = 손 크기 β를 영상으로
+conda run --no-capture-output -n wuji_ros python scripts/run.py contact   --session $S \
+    --object-config data/brl_mocap_cam_hand/config_rerun_object_mk4_wuji.yaml --object-mesh data/brl_mocap_cam_hand/01_Hexagonal_Prism_with_tracker.stl   # 물체를 쥔 프레임: 손 위치만 물체에 닿게
 conda run --no-capture-output -n wuji_ros python scripts/run.py calib     --session $S
 conda run --no-capture-output -n wuji_ros python scripts/run.py overlay   --session $S   # output/$S/overlay.{mp4,gif}
 conda run --no-capture-output -n wuji_ros python scripts/run.py overlay   --session $S \
@@ -161,6 +163,7 @@ conda run --no-capture-output -n wuji_ros python scripts/run.py import data/brl_
 | `glovefit` | `glovefit/NNNNNN.npz` G1 hand_pose, β, `T_wrist_from_mano`, 잔차 |
 | `fit` | `fit/<camera>/NNNNNN.npz` 카메라 좌표계 V1 |
 | `fit4` | `fit4/NNNNNN.npz` world V1. glove IMU 자세 항(기울기 + 세션 yaw)과 IMU 시작점, 2D 라벨 거울 가설로 손바닥/손등 뒤집힘과 방향 튐을 처리한다. 손 크기 β와 손가락 자세는 기본으로 G1(장갑) 값이다. `--shape image`는 세션의 모든 프레임으로 β 하나를 영상(2D + depth)으로 푼다. `summary.json`에 β, 세션 yaw, IMU 회전 오차 |
+| `contact` | `contact/NNNNNN.npz`(`fit4`와 같은 키, 위치만 옮김) + `held`, `t_world`, `T_world_from_obj`, `obj_lift_mm`, 이동 전후 손-물체 최소 부호 거리·관통 정점 수·재투영·depth 표면, `summary.json`. 쥔 프레임(물체의 가장 낮은 점이 첫 프레임보다 5 mm 넘게 들려 있고 `fit4` 손이 20 mm 안. 옆에 내려놓거나 책상 위에서 돌리는 물체는 해당하지 않음)에서 손이 물체에 닿고 관통하지 않게 하는 가장 작은 이동이다. 손가락이 물체의 마주 보는 두 면을 뚫어 빠져나갈 방향이 없으면 400개 방향에서 빠져나오는 가장 작은 이동을 쓴다. 손가락·β·회전은 `fit4` 그대로다. `overlay --hand contact`로 그린다(`overlay_contact[_object]/`) |
 | `calib` | `calib/report.json` 테이블 평면, 카메라별 손목 일치 |
 | `tactile` | `tactile/NNNNNN.jpg`, `tactile.mp4`, `tactile.gif`. 24×31 촉각 맵(binary 접촉 표시)과 영역별 최댓값 |
 | `overlay` | `overlay/NNNNNN.jpg`, `overlay.mp4`(H.264 yuv444p), `overlay.gif`. 카메라 위에는 손 mesh와 MANO 골격만 그린다. 재생은 추출 간격과 무관한 고정 `--fps`(프레임 순서) |

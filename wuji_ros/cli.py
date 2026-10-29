@@ -9,6 +9,7 @@ Stages and their environments (README "환경"):
     fit        V1 per camera: wrist 6D from HaMeR+depth  wuji_ros
     calib      calibration check (table, hand agreement) wuji_ros
     fit4       V1 over all views in world                wuji_ros
+    contact    held frames: fit4 hand moved onto the object  wuji_ros
     overlay    MANO mesh + skeleton in every view        wuji_ros
                (+ the mocap-posed object: overlay_object)
     tactile    glove tactile map per frame               wuji_ros
@@ -81,6 +82,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help="hand size: glove = glovefit's beta (glove bone lengths); image = one beta for the "
                         "session fitted with every frame's pose (2D + depth)")
 
+    p = sub.add_parser("contact", help="while the object is held, move the fit4 hand (position only) by the least "
+                                       "that makes it touch the mocap-posed object without penetrating it")
+    _session_args(p)
+    p.add_argument("--object-config", type=Path, required=True,
+                   help="collector's rerun yaml (object.marker_offsets by marker name, units, mesh_scale)")
+    p.add_argument("--object-mesh", type=Path, required=True, help="object mesh (STL) in the OBJ frame")
+
     p = sub.add_parser("calib", help="check the assigned calibration: table planes + per-camera hand agreement")
     p.add_argument("--session", required=True)
 
@@ -97,6 +105,8 @@ def build_parser() -> argparse.ArgumentParser:
                         "marker_offsets_unit, mesh_scale, min_valid_markers; with --object-mesh the object is drawn too, "
                         "into output/<session>/overlay_object/ (needs the calibration's mocap2cam.npy)")
     p.add_argument("--object-mesh", type=Path, default=None, help="object mesh (STL) in the OBJ frame")
+    p.add_argument("--hand", choices=("fit4", "contact"), default="fit4",
+                   help="hand source: fit4, or the contact stage's (into overlay_contact[_object]/)")
     return parser
 
 
@@ -127,6 +137,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         from .handfit import run_world
         run_world(args.session, glove_thickness_m=args.glove_thickness_mm / 1000.0, imu_weight=args.imu_weight,
                   shape=args.shape, force=args.force)
+    elif args.command == "contact":
+        from .contactfit import run
+        run(args.session, object_config=args.object_config, object_mesh=args.object_mesh, force=args.force)
     elif args.command == "calib":
         from .calibcheck import run
         run(args.session)
@@ -138,5 +151,5 @@ def main(argv: Optional[List[str]] = None) -> int:
             parser.error("--object-config and --object-mesh go together")
         from .viz import run
         run(args.session, fps=args.fps, object_config=args.object_config, object_mesh=args.object_mesh,
-            force=args.force)
+            hand=args.hand, force=args.force)
     return 0

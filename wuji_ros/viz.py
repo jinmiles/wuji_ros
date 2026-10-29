@@ -7,6 +7,7 @@ overlay  2x2 montage of the four whole camera frames (camera1 camera2 / camera3
          each camera's own fit instead.
          With --object-config/--object-mesh (stage overlay_object) the mocap-posed
          object (objectpose.py) is drawn too, its faces depth-sorted with the hand's.
+         --hand contact draws the contact stage's hand (overlay_contact[_object]).
 tactile  The glove's 24x31 tactile map per frame (pressure colour, grey = invalid
          taxel, white box = binary contact) with each zone's maximum, on its own,
          so it never covers the camera images.
@@ -14,6 +15,7 @@ The source filename and the numbers go in a strip under the image, not on it.
 
     output/<session>/overlay/NNNNNN.jpg, overlay.mp4, overlay.gif
     output/<session>/overlay_object/NNNNNN.jpg, overlay_object.mp4, overlay_object.gif
+    output/<session>/overlay_contact_object/NNNNNN.jpg, overlay_contact_object.mp4, overlay_contact_object.gif
     output/<session>/tactile/NNNNNN.jpg, tactile.mp4, tactile.gif
 """
 
@@ -141,8 +143,9 @@ def write_media(frames: List[Path], mp4: Path, gif: Path, fps: float) -> None:
 
 
 def run(session: str, fps: float = 2.0, object_config: Optional[Path] = None, object_mesh: Optional[Path] = None,
-        force: bool = False) -> None:
-    """Stage `overlay`; with an object config and mesh, also the mocap-posed object, into stage `overlay_object`."""
+        hand: str = "fit4", force: bool = False) -> None:
+    """Stage `overlay`; with an object config and mesh, also the mocap-posed object (`_object`); hand "contact"
+    draws the contact stage's hand (`overlay_contact`)."""
     from .mano import Mano
     from .rig import rig_for
 
@@ -159,7 +162,11 @@ def run(session: str, fps: float = 2.0, object_config: Optional[Path] = None, ob
         obj = ObjectModel(object_config, object_mesh)
         LOGGER.info("object: %d verts, %d faces, markers %s (OBJ frame) -> world via calibration/%s/mocap2cam.npy",
                     len(obj.verts), len(obj.faces), sorted(obj.offsets), rig.name)
-    stage = "overlay" if obj is None else "overlay_object"
+    if hand == "contact":
+        from .contactfit import load as load_hand
+    else:
+        load_hand = handfit.load_world
+    stage = "overlay" + ("_contact" if hand == "contact" else "") + ("_object" if obj is not None else "")
     out = stage_dir(session, stage)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -172,7 +179,7 @@ def run(session: str, fps: float = 2.0, object_config: Optional[Path] = None, ob
         if target.is_file() and not force:
             continue
         tiles, notes = [], []
-        world = handfit.load_world(session, f) if rig is not None else None
+        world = load_hand(session, f) if rig is not None else None
         obj_world, obj_note = None, None
         if obj is not None:
             rec = s.object(f)
@@ -214,7 +221,8 @@ def run(session: str, fps: float = 2.0, object_config: Optional[Path] = None, ob
                          f"  tilt {float(fit['gravity_err_deg']):.0f}deg")
         grid = np.vstack([np.hstack(tiles[:2]), np.hstack(tiles[2:4])])
         t = float(s.rows[f]["master_stamp"]) - float(s.rows[s.frame_ids[0]]["master_stamp"])
-        source = (f"4-view world fit, calibration {rig.name}" if world is not None
+        source = (f"4-view world fit{' + contact refinement' if hand == 'contact' else ''}, calibration {rig.name}"
+                  if world is not None
                   else "no 4-view fit for this frame" if rig is not None else "per-camera fit")
         lines = [f"{session}  frame {frame_name(f)}.png   t={t:.1f}s   MANO mesh + skeleton: glove fingers, posed by {source}",
                  "   |   ".join(notes)]
@@ -222,6 +230,12 @@ def run(session: str, fps: float = 2.0, object_config: Optional[Path] = None, ob
             tilt = float(world["gravity_err_deg"])
             lines.append(f"depth {float(world['surface_mm_median']):.1f}mm   IMU tilt vs fit {tilt:.0f}deg"
                          + ("   ** IMU disagrees > 90deg: palm/back flip suspected **" if tilt > 90 else ""))
+        if world is not None and hand == "contact":
+            lines.append(f"contact: {'held' if world['held'] else 'not held'}, hand moved "
+                         f"{np.linalg.norm(world['t_world']) * 1e3:.1f}mm, nearest hand-object distance "
+                         f"{float(world['min_sd_mm_before']):+.1f} -> {float(world['min_sd_mm_after']):+.1f}mm "
+                         f"(< 0 = inside), surface {float(world['surface_mm_before']):.1f} -> "
+                         f"{float(world['surface_mm_median']):.1f}mm")
         if obj_note is not None:
             lines.append(obj_note)
         cv2.imwrite(str(target), np.vstack([grid, _strip(grid.shape[1], lines)]), [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
