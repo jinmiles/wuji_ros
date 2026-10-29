@@ -18,6 +18,7 @@ GT가 없으므로 결과는 정확도가 아니라 독립 채널(glove EMF, 4�
 | E011 | 채택 | `keypoints` 2차 박스: 1차 손 주변 20 cm의 어두운 덩어리에서 IMU 손 방향(r_wrist −Z) 끝 13 cm. `fit4`는 E009, 판별은 E010과 같다 | IMU 박스 43/50프레임. 삼각측량 45/50, `fit4` 37. E008에서 틀리던 9프레임: 재투영 27.3 → 12.8 px, 장갑 위 손바닥 관절 0.67 → 0.96. 맞던 29프레임: 재투영 9.9 → 9.6 px, 표면 8.5 → 8.9 mm, 장갑 위 0.88 → 0.92. 프레임 간 손목 이동 중앙값 77 → 42 mm. IMU 회전 오차 30° 초과 9 → 3(f168 39°, f184 76°, f320 31°). `fit4` HaMeR 뷰의 IMU yaw 지지 75 → 89% | 채택. 육안: f89·f120·f200·f224·f320·f328이 손목 유닛에서 장갑 위로 옮겨 갔고, 맞던 f57·f240·f296은 그대로다. 남은 실패: 왼손에 건네는 f184(맨손 왼손에 붙음), f168(camera2 손목이 유닛 쪽). f192는 결과가 없다 |
 | E012 | 채택 | `import --align index`: 수집기 행의 스트림을 시간차와 상관없이 모두 쓴다(E011: camera1 기준 카메라 17 ms, glove 10 ms를 넘으면 결측). 나머지 stage 코드는 E011과 같다 | 검은 뷰가 있는 프레임 22 → 0, `fit4` 37 → 49/50(남은 f192는 왼손에 건네는 프레임). 새로 들어온 37개 뷰(camera1과 17–75 ms 차이)의 재투영 8.1 px, 원래 있던 뷰 10.1 px, 33 ms 넘는 8개 뷰 8.5 px. 둘 다 결과가 있는 37프레임: 재투영 9.8 → 10.0 px, 표면 8.9 → 9.0 mm, IMU 회전 오차 30° 초과 3 → 2(f168 39° → 13°). 새 12프레임: 재투영 5.0–12.1 px, 장갑 위 손바닥 관절 0.75–1.00 | 채택. 육안: 새 12프레임은 네 뷰 모두 손이 장갑 위에 있고, f168은 손목 유닛에서 장갑으로 옮겨 갔다. 뷰 구성이 같은 프레임(f224, f320 등)은 그대로다. 0.5 s 간격에서는 뷰 간 시간차(최대 75 ms)의 피해가 재투영에 보이지 않는다. `import` 기본값을 `index`로 바꿨다(사용자 결정, 2026-10-26) |
 | E013 | 실행 대기 | `fit4 --shape image`: 손 크기 β를 G1(장갑 뼈 길이)에서 영상(세션 49프레임의 2D + depth, β 하나)으로 바꾼다. 손가락 θ와 나머지는 E012와 같다 | — | — |
+| E014 | 완료 | 캘리브만 다시 저장: 기존 캘리브(`20260824_v2`, `20261015`, `provenance.json`)를 지우고 사용자가 올린 3개 파일로 `calibration/20261015/`을 다시 만들었다(sha256 이전과 같음). `import`부터 전 stage `--force`, 코드는 `03f93b2` | `scene`·`segment`·`glovefit`·`keypoints`·`fit`·`fit4`·`calib` 출력이 E012와 비트 단위로 같다. `fit4` 49프레임, 재투영 9.3 px, 표면 8.9 mm, IMU 회전 오차 중앙값 12.5°(30° 초과 2). mocap 링크 확인과 손-물체 관통 수치도 같다 | 재현 확인. 캘리브가 같으므로 E012 결과와 `docs/TODO.md`의 카메라별 어긋남 보고는 그대로 유효하다 |
 
 ## `1015-5` 조건 (2026-10-16)
 
@@ -157,3 +158,27 @@ GT가 없으므로 결과는 정확도가 아니라 독립 채널(glove EMF, 4�
   - MANO 정점 778개, 관절 순서(OpenPose-21), frame_id, world 좌표계(캘리브 `20261015`), 단위 m는 E012와 같다.
   - `fit4/*.npz`에 `betas`(10,)가 더해진다. `summary.json`에 `shape`, `betas`, `betas_glove`가 더해진다.
   - `T_world_from_wrist`는 G1의 r_wrist ↔ MANO 정렬을 그대로 쓴다. 그 정렬은 G1 β로 만든 것이라, 촉각 taxel 위치에 β 변화만큼 차이가 남을 수 있다.
+
+## `20261022_163051` 캘리브 다시 저장 후 전체 재실행 (E014, 2026-10-29)
+
+- 계기: plan.md §6 17(사용자 결정 2026-10-29). 기존 캘리브 정보를 모두 지우고 사용자가 올린 `w2c_ext.npz`, `t2r_ext.npz`, `mocap2cam.npy`만 `calibration/20261015/`에 두었다. 캘리브는 GT라서 고치지 않는다.
+  - 세 파일의 sha256은 이전 `20261015` 파일과 같다(`5e33cc19…bb20`, `0052ebf0…0ecf`, `2665c92b…c169`).
+  - 실행 전후로 sha256이 바뀌지 않았다.
+- 바꾼 것 하나: 캘리브 폴더(내용은 바이트 동일). 코드는 `03f93b2`(`fit4 --shape glove` 기본), 설정은 E012와 같다.
+- 명령(GPU 0, 로그 `scratch/logs/<session>/*_e014.log`):
+
+  ```bash
+  S=20261022_163051_mocap_mk4_wuji_fixed_rate; R="conda run --no-capture-output -n wuji_ros python scripts/run.py"; L=scratch/logs/$S
+  $R import data/brl_mocap_cam_hand/$S --camera-config data/brl_mocap_cam_hand/config_rerun_object_mk4_wuji.yaml --every 0.5 --align index --force > $L/import_e014.log 2>&1
+  for st in segment glovefit keypoints fit4 fit; do CUDA_VISIBLE_DEVICES=0 $R $st --session $S --force > $L/${st}_e014.log 2>&1; done
+  $R calib --session $S > $L/calib_e014.log 2>&1; $R overlay --session $S --force > $L/overlay_e014.log 2>&1; $R tactile --session $S --force > $L/tactile_e014.log 2>&1
+  ```
+
+- 결과(실행 전 출력 백업 `scratch/pre_e014`과 비교):
+  - `import`의 `metadata.csv`와 `manifest.json`이 같다.
+  - `scene`, `segment`, `glovefit`, `keypoints`, `fit`, `calib`의 모든 파일이 같다(실수 최대 차 0).
+  - `fit4`는 이전 키의 값이 모두 같다. `03f93b2` 코드가 더하는 `betas`(npz)와 `shape`, `betas`, `betas_glove`(summary)만 늘었다. `betas`는 49프레임 모두 G1 β와 같다.
+  - `scratch/figures/mocap_check.py`와 `hand_object.py`의 json도 같다(camera1 IoU 0.79, 중심 차 4.9 px, depth +4.3 mm; 관통 최대 f224 19.2 mm).
+- 걸린 시간(RTX 3090, 로그 파일 시각 차, conda 시작 포함): segment 49 s, glovefit 38 s, keypoints 39 s, fit4 64 s, fit 49 s, calib 45 s, overlay 50 s, tactile 11 s.
+  import 끝(15:39:38)부터 tactile 끝(15:45:24)까지 5분 46초다. import 시작 시각은 기록하지 않았다.
+- 결론: 재현된다. 캘리브 내용이 같아서 이전 결과와 카메라별 어긋남 보고(camera1은 맞고 camera2–4는 어긋남)가 그대로다.

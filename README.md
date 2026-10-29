@@ -17,7 +17,7 @@ Wuji Glove + 4뷰 RealSense RGB-D + OptiTrack(물체) 녹화에서 오른손의 
 | `plan.md` | 목표, 마일스톤, 완료 조건, 결정 사항 |
 | `RECORDING.md` | 녹화 PC 운영 절차 (설치, 네트워크, 캘리브레이션, 녹화, 문제 해결) |
 | `docs/` | 구조(`ARCHITECTURE.md`), 미해결 항목(`TODO.md`), 실험 기록(`experiments/`) |
-| `calibration/<name>/` | 리그 캘리브 파일 (커밋). 현재 `20260824_v2` |
+| `calibration/<name>/` | 리그 캘리브 파일 (커밋, GT라서 읽기만 한다). 현재 `20261015`: 사용자가 올린 `w2c_ext.npz`, `t2r_ext.npz`, `mocap2cam.npy`만 둔다(2026-10-29) |
 | `wuji_ros/` | 파이썬 패키지. 현재 `bridge/`(glove → ROS2) |
 | `scripts/` | entrypoint. 현재 `glove_bridge.py`, 녹화 PC용 `shells/{setup_bridge,glove_bridge,record_glove}.sh` |
 | `tests/` | 데이터·계약 테스트 |
@@ -132,6 +132,9 @@ conda run --no-capture-output -n wuji_ros python scripts/run.py fit       --sess
 conda run --no-capture-output -n wuji_ros python scripts/run.py fit4      --session $S   # 4뷰 world (rig.SESSION_CALIBRATION 필요). --imu-weight 0 = 영상만, --shape image = 손 크기 β를 영상으로
 conda run --no-capture-output -n wuji_ros python scripts/run.py calib     --session $S
 conda run --no-capture-output -n wuji_ros python scripts/run.py overlay   --session $S   # output/$S/overlay.{mp4,gif}
+conda run --no-capture-output -n wuji_ros python scripts/run.py overlay   --session $S \
+    --object-config data/brl_mocap_cam_hand/config_rerun_object_mk4_wuji.yaml \
+    --object-mesh data/brl_mocap_cam_hand/01_Hexagonal_Prism_with_tracker.stl   # 손 + 물체: output/$S/overlay_object.{mp4,gif}
 conda run --no-capture-output -n wuji_ros python scripts/run.py tactile   --session $S   # output/$S/tactile.{mp4,gif}
 ```
 
@@ -161,3 +164,4 @@ conda run --no-capture-output -n wuji_ros python scripts/run.py import data/brl_
 | `calib` | `calib/report.json` 테이블 평면, 카메라별 손목 일치 |
 | `tactile` | `tactile/NNNNNN.jpg`, `tactile.mp4`, `tactile.gif`. 24×31 촉각 맵(binary 접촉 표시)과 영역별 최댓값 |
 | `overlay` | `overlay/NNNNNN.jpg`, `overlay.mp4`(H.264 yuv444p), `overlay.gif`. 카메라 위에는 손 mesh와 MANO 골격만 그린다. 재생은 추출 간격과 무관한 고정 `--fps`(프레임 순서) |
+| `overlay --object-config --object-mesh` | `overlay_object/NNNNNN.jpg`, `overlay_object.mp4`, `overlay_object.gif`. 손에 mocap 물체 mesh(노란색)를 더한다. 물체는 yaml `object.marker_offsets`(마커 이름으로 대응)를 기록된 마커에 Kabsch로 맞추고, 캘리브의 `mocap2cam.npy`로 camera1을 거쳐 world에 놓는다. 링크가 없는 캘리브에서는 멈춘다(추정하지 않음). yaml의 마커 이름 대응은 녹화마다 다르므로 로그의 CAD 맞춤 RMSE를 본다 |

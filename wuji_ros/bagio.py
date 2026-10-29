@@ -580,3 +580,7 @@ class Session:
     def glove(self, frame_id: int) -> Optional[Dict[str, np.ndarray]]:
         p = self.root / "glove" / f"{frame_name(frame_id)}.npz"
         return dict(np.load(p)) if p.is_file() else None
+
+    def object(self, frame_id: int) -> Optional[Dict[str, np.ndarray]]:
+        p = self.root / "object" / f"{frame_name(frame_id)}.npz"
+        return dict(np.load(p)) if p.is_file() else None

@@ -47,6 +47,12 @@ class Rig:
     def center(self, cam: str) -> np.ndarray:
         return self.T_world_from_cam(cam)[:3, 3]
 
+    def T_world_from_mocap(self) -> Optional[np.ndarray]:
+        """T_world_from_cam1 @ T_cam1_from_mocap (calibration/<name>/mocap2cam.npy, m), or None when the
+        calibration has no delivered link; it is never estimated."""
+        p = CALIBRATION_DIR / self.name / "mocap2cam.npy"
+        return self.T_world_from_cam("camera1") @ np.load(p) if p.is_file() else None
+
 
 def rig_for(session: str) -> Optional[Rig]:
     name = SESSION_CALIBRATION.get(session)

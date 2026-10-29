@@ -7,10 +7,12 @@
   마커 라벨 순서는 녹화마다 바뀌었다(yaml 주석, `20261022_163051`은 아래).
   손 점군(골격 3 cm 반경)에서 물체 점을 빼지 않는다. 그래서 물체를 쥔 프레임에서는 물체 점이 V1 표면 항에 섞인다.
 - 필요한 곳: M5 손 점군에서 물체 점 제거, M9 관통·접촉, 물체 overlay.
+  물체 overlay는 2026-10-29에 `overlay --object-config --object-mesh`(`wuji_ros/objectpose.py`)로 넣었다. 물체 자세는 scratch 계산과 같다(회전 3e-6°, 위치 3e-5 mm 안).
 - 2026-10-26 확인(mocap만으로, 링크 불필요): `20261022_163051`의 마커 라벨은 marker0..3 = D, C, A, B다(쌍 거리 최대 차 0.65 mm).
   yaml의 현재 `marker_offsets`와 같다. 392행 CAD 맞춤 RMSE는 중앙값 0.30 mm, 최대 0.87 mm로 라벨 뒤바뀜이 없다.
 - 링크는 추정하지 않는다(사용자 결정 2026-10-26). 2026-10-26 연구실 파일을 받아 `calibration/20261015/mocap2cam.npy`에 두었다.
   rerun 설정의 `calibration.mocap2cam1_path`가 가리키는 파일이다. 4×4 `T_cam1_from_mocap`이고 단위는 m다. sha256은 `2665c92b…c169`다.
+  2026-10-29 사용자가 올린 3개 파일만으로 `calibration/`을 다시 만들었다(plan.md §6 17). 세 파일 모두 이전 파일과 sha256이 같아서 아래 수치는 그대로 유효하다.
 - 카메라 파라미터는 고치지 않는다(사용자 결정 2026-10-27). 대상은 `calibration/`의 파일과 세션 intrinsics다. 아래 어긋남은 보고용 수치다.
 - 링크 확인(M4, 2026-10-26): `scratch/figures/mocap_check.py`, 정적 24프레임(물체 < 0.02 m/s).
   측정 마커와 CAD로 놓은 기둥을 각 카메라에 투영했다. 주황 픽셀(확인용)과 depth에 비교했다.

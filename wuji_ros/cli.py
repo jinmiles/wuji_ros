@@ -10,6 +10,7 @@ Stages and their environments (README "환경"):
     calib      calibration check (table, hand agreement) wuji_ros
     fit4       V1 over all views in world                wuji_ros
     overlay    MANO mesh + skeleton in every view        wuji_ros
+               (+ the mocap-posed object: overlay_object)
     tactile    glove tactile map per frame               wuji_ros
 """
 
@@ -91,11 +92,17 @@ def build_parser() -> argparse.ArgumentParser:
     _session_args(p)
     p.add_argument("--fps", type=float, default=2.0,
                    help="playback rate in sequence order (extracted frames are every --every s)")
+    p.add_argument("--object-config", type=Path, default=None,
+                   help="collector's rerun yaml whose object section gives marker_offsets (OBJ frame, by marker name), "
+                        "marker_offsets_unit, mesh_scale, min_valid_markers; with --object-mesh the object is drawn too, "
+                        "into output/<session>/overlay_object/ (needs the calibration's mocap2cam.npy)")
+    p.add_argument("--object-mesh", type=Path, default=None, help="object mesh (STL) in the OBJ frame")
     return parser
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
     if args.command == "extract":
         from .bagio import extract
         extract(args.bag, session=args.session, every_s=args.every, start_s=args.start,
@@ -127,6 +134,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         from .viz import run_tactile
         run_tactile(args.session, fps=args.fps, force=args.force)
     elif args.command == "overlay":
+        if (args.object_config is None) != (args.object_mesh is None):
+            parser.error("--object-config and --object-mesh go together")
         from .viz import run
-        run(args.session, fps=args.fps, force=args.force)
+        run(args.session, fps=args.fps, object_config=args.object_config, object_mesh=args.object_mesh,
+            force=args.force)
     return 0

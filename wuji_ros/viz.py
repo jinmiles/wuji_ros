@@ -5,12 +5,15 @@ overlay  2x2 montage of the four whole camera frames (camera1 camera2 / camera3
          (shaded, translucent) and its 21-joint skeleton, from the 4-view world fit
          (fit4) projected into every view; a session without a calibration shows
          each camera's own fit instead.
+         With --object-config/--object-mesh (stage overlay_object) the mocap-posed
+         object (objectpose.py) is drawn too, its faces depth-sorted with the hand's.
 tactile  The glove's 24x31 tactile map per frame (pressure colour, grey = invalid
          taxel, white box = binary contact) with each zone's maximum, on its own,
          so it never covers the camera images.
 The source filename and the numbers go in a strip under the image, not on it.
 
     output/<session>/overlay/NNNNNN.jpg, overlay.mp4, overlay.gif
+    output/<session>/overlay_object/NNNNNN.jpg, overlay_object.mp4, overlay_object.gif
     output/<session>/tactile/NNNNNN.jpg, tactile.mp4, tactile.gif
 """
 
@@ -19,7 +22,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import List, Optional, Sequence, Tuple
 
 import cv2
 import numpy as np
@@ -36,12 +39,22 @@ CRF = 18
 FINGER_COLORS = [(0, 0, 255), (0, 165, 255), (0, 255, 255), (0, 255, 0), (255, 128, 0)]  # BGR, thumb..pinky
 
 
-def draw_hand(img: np.ndarray, K: np.ndarray, verts: np.ndarray, joints: np.ndarray, faces: np.ndarray) -> np.ndarray:
-    """Painter's-algorithm mesh + skeleton, camera-frame points in metres."""
+HAND_BGR = (0.9, 0.75, 0.55)  # times the shade
+OBJECT_BGR = (0.25, 0.85, 1.0)
+
+
+def draw_scene(img: np.ndarray, K: np.ndarray, meshes: Sequence[Tuple[np.ndarray, np.ndarray, Tuple[float, ...]]],
+               joints: Optional[np.ndarray] = None) -> np.ndarray:
+    """Painter's-algorithm meshes (verts, faces, BGR), all faces in one depth order so the meshes occlude
+    each other, + the hand skeleton; camera-frame points in metres."""
     def proj(X):
         uv = (K @ X.T).T
         return uv[:, :2] / uv[:, 2:]
 
+    offsets = np.cumsum([0] + [len(v) for v, _, _ in meshes])
+    verts = np.vstack([v for v, _, _ in meshes])
+    faces = np.vstack([f + o for (_, f, _), o in zip(meshes, offsets)])
+    base = np.vstack([np.tile(bgr, (len(f), 1)) for _, f, bgr in meshes])
     uv = proj(verts)
     tri = verts[faces]
     n = np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])
@@ -50,10 +63,11 @@ def draw_hand(img: np.ndarray, K: np.ndarray, verts: np.ndarray, joints: np.ndar
     shade = np.abs((n * view).sum(1))
     layer = img.copy()
     for fi in np.argsort(-tri[:, :, 2].mean(1)):  # far to near
-        c = 80 + 175 * shade[fi]
-        cv2.fillConvexPoly(layer, np.round(uv[faces[fi]] * 4).astype(np.int32), (c * 0.9, c * 0.75, c * 0.55),
+        cv2.fillConvexPoly(layer, np.round(uv[faces[fi]] * 4).astype(np.int32), (base[fi] * (80 + 175 * shade[fi])).tolist(),
                            lineType=cv2.LINE_AA, shift=2)
     out = cv2.addWeighted(layer, 0.55, img, 0.45, 0)
+    if joints is None:
+        return out
     j2 = proj(joints)
     for k, (p, c) in enumerate(BONES):
         cv2.line(out, tuple(np.round(j2[p]).astype(int)), tuple(np.round(j2[c]).astype(int)),
@@ -61,6 +75,11 @@ def draw_hand(img: np.ndarray, K: np.ndarray, verts: np.ndarray, joints: np.ndar
     for q in j2:
         cv2.circle(out, tuple(np.round(q).astype(int)), 3, (255, 255, 255), -1, cv2.LINE_AA)
     return out
+
+
+def draw_hand(img: np.ndarray, K: np.ndarray, verts: np.ndarray, joints: np.ndarray, faces: np.ndarray) -> np.ndarray:
+    """Painter's-algorithm mesh + skeleton, camera-frame points in metres."""
+    return draw_scene(img, K, [(verts, faces, HAND_BGR)], joints)
 
 
 TACTILE_SCALE = 24  # px per taxel in the tactile view
@@ -121,17 +140,31 @@ def write_media(frames: List[Path], mp4: Path, gif: Path, fps: float) -> None:
     LOGGER.info("%d frames -> %s, %s", len(frames), mp4.name, gif.name)
 
 
-def run(session: str, fps: float = 2.0, force: bool = False) -> None:
+def run(session: str, fps: float = 2.0, object_config: Optional[Path] = None, object_mesh: Optional[Path] = None,
+        force: bool = False) -> None:
+    """Stage `overlay`; with an object config and mesh, also the mocap-posed object, into stage `overlay_object`."""
     from .mano import Mano
+    from .rig import rig_for
 
     s = Session(session)
-    out = stage_dir(session, "overlay")
+    rig = rig_for(session)
+    obj, T_world_from_mocap, rmse_mm = None, None, []
+    if object_mesh is not None:
+        from .objectpose import ObjectModel
+
+        T_world_from_mocap = rig.T_world_from_mocap() if rig is not None else None
+        if T_world_from_mocap is None:
+            raise SystemExit(f"{session}: the object needs the calibration's delivered mocap2cam.npy "
+                             "(rig.SESSION_CALIBRATION); it is never estimated")
+        obj = ObjectModel(object_config, object_mesh)
+        LOGGER.info("object: %d verts, %d faces, markers %s (OBJ frame) -> world via calibration/%s/mocap2cam.npy",
+                    len(obj.verts), len(obj.faces), sorted(obj.offsets), rig.name)
+    stage = "overlay" if obj is None else "overlay_object"
+    out = stage_dir(session, stage)
     out.mkdir(parents=True, exist_ok=True)
-    from .rig import rig_for
 
     faces = Mano("cpu").faces
     Ks = {c: s.K(c) for c in s.cameras}
-    rig = rig_for(session)
     written = []
     for f in s.frame_ids:
         target = out / f"{frame_name(f)}.jpg"
@@ -140,18 +173,36 @@ def run(session: str, fps: float = 2.0, force: bool = False) -> None:
             continue
         tiles, notes = [], []
         world = handfit.load_world(session, f) if rig is not None else None
+        obj_world, obj_note = None, None
+        if obj is not None:
+            rec = s.object(f)
+            pose = obj.T_mocap_from_obj(rec) if rec is not None else None
+            if pose is None:
+                obj_note = "object: no mocap row" if rec is None else "object: too few named markers"
+            else:
+                T = T_world_from_mocap @ pose[0]
+                obj_world = obj.verts @ T[:3, :3].T + T[:3, 3]
+                rmse_mm.append(pose[1] * 1e3)
+                obj_note = (f"object (yellow): {pose[2]} markers, CAD fit RMSE {pose[1] * 1e3:.2f}mm, "
+                            f"mocap - camera1 {float(s.rows[f]['object_dt_ms']):+.0f}ms, "
+                            f"world via calibration/{rig.name}/mocap2cam.npy (camera1)")
         for cam in s.cameras:
             img = s.color(cam, f)
             if img is None:
                 tiles.append(np.zeros((720, 1280, 3), np.uint8))
                 notes.append(f"{cam}: no frame")
                 continue
-            if world is not None:
-                tiles.append(draw_hand(img, Ks[cam], rig.to_cam(cam, world["verts_world"]),
-                                       rig.to_cam(cam, world["joints_world"]), faces))
-                views = list(world["views"])
+            if world is not None or obj_world is not None:
+                meshes = []
+                if world is not None:
+                    meshes.append((rig.to_cam(cam, world["verts_world"]), faces, HAND_BGR))
+                if obj_world is not None:
+                    meshes.append((rig.to_cam(cam, obj_world), obj.faces, OBJECT_BGR))
+                tiles.append(draw_scene(img, Ks[cam], meshes,
+                                        rig.to_cam(cam, world["joints_world"]) if world is not None else None))
+                views = list(world["views"]) if world is not None else []
                 notes.append(f"{cam}: reproj {np.median(world['reproj_px'][views.index(cam)]):.1f}px"
-                             if cam in views else f"{cam}: no HaMeR")
+                             if cam in views else f"{cam}: no HaMeR" if world is not None else f"{cam}: no hand fit")
                 continue
             fit = handfit.load(session, cam, f) if rig is None else None  # calibrated: only the 4-view fit
             if fit is None:
@@ -171,8 +222,14 @@ def run(session: str, fps: float = 2.0, force: bool = False) -> None:
             tilt = float(world["gravity_err_deg"])
             lines.append(f"depth {float(world['surface_mm_median']):.1f}mm   IMU tilt vs fit {tilt:.0f}deg"
                          + ("   ** IMU disagrees > 90deg: palm/back flip suspected **" if tilt > 90 else ""))
+        if obj_note is not None:
+            lines.append(obj_note)
         cv2.imwrite(str(target), np.vstack([grid, _strip(grid.shape[1], lines)]), [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
-    write_media(written, OUTPUT_DIR / session / "overlay.mp4", OUTPUT_DIR / session / "overlay.gif", fps)
+    if rmse_mm:
+        LOGGER.info("object posed in %d frames: CAD fit RMSE median %.2f mm, max %.2f mm (%d over %.0f mm)",
+                    len(rmse_mm), np.median(rmse_mm), max(rmse_mm), sum(r > obj.max_rmse_m * 1e3 for r in rmse_mm),
+                    obj.max_rmse_m * 1e3)
+    write_media(written, OUTPUT_DIR / session / f"{stage}.mp4", OUTPUT_DIR / session / f"{stage}.gif", fps)
 
 
 def _zone_bars(glove: dict, width: int, height: int) -> np.ndarray:

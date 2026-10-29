@@ -28,14 +28,15 @@ extract → segment(table, depth+RGB box) → G1 → keypoints(HaMeR, IMU 손 �
 | `wuji_ros/bridge/convert.py` | SDK frame → 메시지 필드 값. ROS·SDK import 없는 순수 함수 (구현됨, `tests/test_bridge_convert.py`) |
 | `wuji_ros/bridge/node.py` | 녹화 PC용 ROS2 노드 `wuji_glove_bridge` (구현됨) |
 | `wuji_ros/bagio.py` | bag → `data/<session>/` (마스터 클럭 동기), `Session` reader (구현됨). bag을 SQLite로 직접 읽어 `metadata.yaml`이 없어도 된다. `import_dir`: 다른 수집기가 미리 샘플링한 폴더 → 같은 레이아웃 (구현됨) |
-| `wuji_ros/rig.py` | 캘리브 로드, camera ↔ world, 세션 → 캘리브 표 `SESSION_CALIBRATION` (구현됨. mocap → world는 아직 없음) |
+| `wuji_ros/rig.py` | 캘리브 로드, camera ↔ world, 세션 → 캘리브 표 `SESSION_CALIBRATION`, mocap → world(`T_world_from_mocap`: 전달된 `mocap2cam.npy`를 camera1로, 없으면 None) (구현됨) |
 | `wuji_ros/calibcheck.py` | 캘리브 확인: 카메라별 테이블 평면, 카메라별 V1 손목 일치 (구현됨) |
 | `wuji_ros/keypoints.py` | HaMeR 2회(depth 박스 → 삼각측량 투영 박스) + DLT 삼각측량. `third_party/hamer` wrapper (sys.path 주입, `hamer.configs.CACHE_DIR_HAMER`를 `assets/hamer`로 지정, upstream `load_hamer`와 같은 설정에 `HAMER(init_renderer=False)`. 학습 시각화용 pyrender 렌더러는 EGL이 없는 서버에서 실패한다). crop은 upstream ViTDetDataset 수식을 재구현(env에 scikit-image 없음). 오른손만: 두 pass 모두 HaMeR 손바닥 관절 6개 중 2개 이상이 어두운(검은 장갑) 픽셀 위에 있는 뷰만 쓴다 (구현됨) |
 | `wuji_ros/segment.py` | 테이블 평면·영역, depth + RGB 손 후보와 1차 박스, 삼각측량 골격 주변 손 점군 `hand_points` (구현됨) |
 | `wuji_ros/mano.py` | MANO forward, OpenPose-21 관절 순서 (구현됨) |
 | `wuji_ros/glovefit.py` | G1, glove IMU 자세의 world 변환(`waist_in_world`, `keypoints`·`fit4` 공용) (구현됨) |
 | `wuji_ros/handfit.py` | V1 카메라별(`fit`)과 4뷰 world(`fit4`) (구현됨). `fit4`는 glove 융합 IMU 자세 항(기울기 + 세션 yaw, 기본 가중치 100)과 IMU 시작점, 2D 라벨 거울 가설(손바닥/손등 뒤집힘 대응)을 쓴다. β(손 크기)는 기본으로 G1 β다(`--shape glove`, 2026-10-27). `--shape image`는 세션의 모든 프레임으로 β 하나를 영상으로 푼다. 카메라별 `fit`은 늘 G1 β다. V2(손가락 미세조정)는 하지 않는다 |
-| `wuji_ros/viz.py` | 카메라 overlay(손 mesh + MANO 골격만), 촉각 맵 별도 시퀀스, 각각 H.264(yuv444p) mp4 + gif (구현됨) |
+| `wuji_ros/objectpose.py` | mocap 물체 자세: 수집기 yaml의 `marker_offsets`(OBJ 좌표, 마커 이름으로 대응)를 기록된 마커에 Kabsch로 맞춘 `T_mocap_from_obj`, STL mesh (구현됨, 2026-10-29). M5 물체 점 제거와 M9 관통·접촉에서 다시 쓴다 |
+| `wuji_ros/viz.py` | 카메라 overlay(손 mesh + MANO 골격), `--object-config/--object-mesh`이면 mocap 물체 mesh도 같은 깊이 순서로 그려 `overlay_object/`에 둔다. 촉각 맵 별도 시퀀스. 각각 H.264(yuv444p) mp4 + gif (구현됨) |
 | `wuji_ros/evaluate.py` | 일치도 지표, 프레임별 라벨 |
 | `wuji_ros/cli.py`, `scripts/run.py` | 분석 entrypoint, 단계별 subcommand, `--force` (구현됨) |
 | `scripts/glove_bridge.py` | 브리지 entrypoint (구현됨) |
@@ -92,37 +93,26 @@ output/<session>/<stage>/...         # 단계별 결과, 재실행 시 재사용
 - 변환 이름은 `T_A_from_B`다. B 좌표를 A 좌표로 옮기고, 합성은 오른쪽에서 왼쪽으로 읽는다.
 - 카메라 광학 프레임: z 앞, x 오른쪽, y 아래.
 
-### 캘리브 `calibration/20260824_v2/` (2026-09-18 DexTouch에서 복사, sha256 동일)
+### 캘리브 `calibration/20261015/` (2026-10-29 다시 저장)
 
-| 파일 | 내용 | 출처 |
+| 파일 | 내용 | sha256 |
 |---|---|---|
-| `w2c_ext.npz` | 키 `"0".."3"` = camera1..camera4, 각 3×4 `T_cam_from_world` | 연구실 전달 |
-| `mocap2cam.npy` | 4×4 `T_cam1_from_mocap`. **camera1에만 유효** | 연구실이 전달하지 않아 DexTouch가 depth ICP로 유도한 임시값 |
-| `t2r_ext.npz` | camera3 기준 카메라 간 변환. 사용하지 않음 | 연구실 전달 |
-| `provenance.json` | `mocap2cam.npy` 유도 방법과 불확실성 | DexTouch |
+| `w2c_ext.npz` | 키 `"0".."3"` = camera1..camera4, 각 3×4 `T_cam_from_world`, m | `5e33cc19…bb20` |
+| `mocap2cam.npy` | 4×4 `T_cam1_from_mocap`, m | `2665c92b…c169` |
+| `t2r_ext.npz` | camera3 기준 카메라 간 변환. 사용하지 않음 | `0052ebf0…0ecf` |
 
-- **world**: DexTouch 문서 기준 aruco 보드 좌표계, **z-DOWN**, 보드(테이블) 평면 z ≈ 0.
-  이 해석은 새 녹화의 샘플로 M4에서 다시 확인하기 전까지 가정이다.
-- **mocap → world**: `T_world_from_mocap = T_world_from_cam1 · T_cam1_from_mocap`.
-  `mocap2cam.npy`를 다른 카메라에 직접 적용하지 않는다.
-- **불확실성**:
-  - `mocap2cam.npy`는 세션 간 0.99° / 2.6 mm 차이가 났다(DexTouch `docs/calibration.md`).
-  - `w2c_ext`와 `t2r_ext`는 같은 카메라 쌍에서 0.22–1.96° / 7–35 mm 어긋난다.
-- **새 녹화에서의 유효성**: 이 캘리브는 2026-08-24 리그 상태다. 카메라가 움직였으면 틀린다.
-  DexTouch 기록에 카메라가 녹화 사이에 움직인 사례가 있다. 그래서 M4에서 물체 마커 투영으로 확인한다.
-- 물체 rigid body quaternion 순서는 xyzw로 가정한다(DexTouch 기록). 새 bag의 메시지 타입으로 확인한다.
-
-### 캘리브 `calibration/20261015/` (2026-10-16 전달)
-
-- 형식은 `20260824_v2`와 같다(`w2c_ext.npz` 3×4 `T_cam_from_world`).
-- `mocap2cam.npy`(4×4 `T_cam1_from_mocap`, m)는 연구실 파일이다. 2026-10-26 16:47 KST에 사용자가 두었고, sha256은 `2665c92b…c169`다. 추정한 값이 아니다.
-  `T_world_from_mocap = T_world_from_cam1 · T_cam1_from_mocap`이라 camera1을 거쳐서만 들어간다.
-  `provenance.json`의 `mocap2cam` 항목은 전달 전 문구("not delivered")로 남아 있다.
-- **카메라 파라미터는 읽기만 한다**(사용자 결정 2026-10-27). 대상은 `calibration/`의 파일과 세션 `intrinsics.json`이다. 어긋나면 수치로 보고만 하고 고치지 않는다.
+- 2026-10-29 사용자 결정: 기존 캘리브 정보(`20260824_v2` 폴더 전체, `20261015`의 파일, 두 `provenance.json`)를 모두 지우고, 사용자가 올린 위 3개 파일만 캘리브로 저장했다.
+  - 세 파일은 지우기 전 `20261015` 파일과 sha256이 같다.
+  - 지운 파일은 git 기록(`03f93b2`)에 남아 있다. DexTouch에서 복사해 depth ICP로 유도한 `20260824_v2`의 `mocap2cam`도 함께 지웠다.
+- **캘리브는 GT라서 읽기만 한다**(사용자 결정 2026-10-27, 2026-10-29). 대상은 `calibration/`의 파일과 세션 `intrinsics.json`이다. 어긋나면 수치로 보고만 하고 고치지 않는다.
   보고된 어긋남은 `docs/TODO.md`에 있다. `20261022_163051` 물체 투영에서 camera1은 맞고 camera2–4는 어긋난다.
+- intrinsics는 캘리브 폴더에 없다. 세션의 `intrinsics.json`(bag의 camera_info, 또는 `import --camera-config` yaml)에서 온다.
+- **mocap → world**: `T_world_from_mocap = T_world_from_cam1 · T_cam1_from_mocap`. 그래서 camera1을 거쳐서만 들어간다.
+  `mocap2cam.npy`를 다른 카메라에 직접 적용하지 않는다.
 - **world**: 카메라 중심 z가 −0.57 ~ −0.88 m라서 z-DOWN이다.
   **테이블 면은 world z에서 12.3° 기울어 있다**(4뷰 RANSAC). 보드가 테이블에 평평하게 놓이지 않은 상태로 캘리브된 것으로 보인다. 그래서 "위쪽"과 "중력"은 world z가 아니라 측정한 테이블 법선(`segment.Table.up`)으로 정한다. IMU 검증은 테이블이 수평이라고 가정한다.
-- 확인 결과는 `calibration/20261015/provenance.json`과 `docs/TODO_completed.md`에 있다.
+- 물체 rigid body quaternion 순서는 xyzw로 가정한다(DexTouch 기록).
+- 확인 결과는 `docs/TODO_completed.md`와 `docs/experiments/001_glove_hand_pose/experiments.md`(E008, E014)에 있다.
 - 세션 → 캘리브 대응은 `wuji_ros/rig.py: SESSION_CALIBRATION`이다.
   - `1015-5` → `20261015`.
   - `20261022_163051_mocap_mk4_wuji_fixed_rate` → `20261015`. 녹화와 같이 온 `w2c_ext.npz`가 sha256까지 같다.

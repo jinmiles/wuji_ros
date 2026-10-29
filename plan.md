@@ -99,7 +99,8 @@
 | `wuji_ros/mano.py` | MANO forward (OpenPose-21 순서 = MediaPipe-21 순서), fingertip 정점 |
 | `wuji_ros/glovefit.py` | G1 |
 | `wuji_ros/handfit.py` | β, V1 |
-| `wuji_ros/viz.py` | 전체 프레임 overlay, mp4(H.264)/gif |
+| `wuji_ros/objectpose.py` | mocap 물체 자세(마커 → CAD Kabsch) |
+| `wuji_ros/viz.py` | 전체 프레임 overlay(손, 선택적으로 물체), mp4(H.264)/gif |
 | `wuji_ros/evaluate.py` | 일치도 지표, 라벨 |
 | `wuji_ros/cli.py`, `scripts/run.py` | 분석 entrypoint 하나, 단계별 subcommand, `--force`로 재생성 |
 | `scripts/glove_bridge.py` | 브리지 entrypoint (녹화 PC) |
@@ -146,7 +147,7 @@ EMF:                        p_wrist(t) = T_wrist_from_emftx · p_emftx(t)     # 
 ### M0 — 문서·환경·의존성
 - `README.md`, `docs/ARCHITECTURE.md`, `docs/TODO.md`, `docs/experiments/README.md`, `docs/experiments/001_glove_hand_pose/experiments.md`.
 - `third_party/hamer` submodule(upstream `geopavlakos/hamer`, `3a01849`). 수정하지 않고 wrapper에서 sys.path로 쓴다.
-- 분석 env `environment.yml`, 자산 심볼릭 링크 `assets/`, 캘리브 `calibration/20260824_v2/` (§6 10–12).
+- 분석 env `environment.yml`, 자산 심볼릭 링크 `assets/`, 캘리브 `calibration/20261015/` (§6 10–12, 17).
 - 녹화 PC: ROS2 Humble python3.10에 `wuji-sdk==2026.8.31` (승인됨). 피험자 named user + `5.calibration.py`로 URDF 확보.
 
 ### M1 — 브리지 노드
@@ -310,6 +311,7 @@ EMF:                        p_wrist(t) = T_wrist_from_emftx · p_emftx(t)     # 
 11. **HaMeR checkpoint·MANO**: `assets/` 아래 심볼릭 링크로 서버 파일을 가리킨다(README "자산").
 12. **캘리브**: DexTouch의 최신 `20260824_v2`를 `calibration/20260824_v2/`에 복사해 재활용한다.
     `mocap2cam.npy`는 전달값이 아니라 유도한 임시값이다. 새 녹화에서의 유효성은 M4에서 확인한다(`docs/TODO.md`).
+    2026-10-29에 지웠다(17).
 
 13. **IMU 기울기를 V1에 사용** (2026-10-16, 사용자 결정): `fit4`에 glove 융합 IMU 자세(`/wuji_glove/right/tf`, roll·pitch만)의 기울기 항을 넣는다. 기본 가중치는 100으로, 손바닥/손등 뒤집힘의 벌점이 200이다. 뒤집힘 검증은 육안(손등 EMF 송신기 방향, 인접 프레임 엄지 위치)과 `--imu-weight 0` 조건 비교로 한다.
 14. **IMU 자세 전체를 V1에 사용** (2026-10-26, 사용자 요청: "튀는 프레임을 IMU로 보정"): `fit4`의 IMU 항을 기울기에서 회전 전체로 넓힌다.
@@ -326,6 +328,10 @@ EMF:                        p_wrist(t) = T_wrist_from_emftx · p_emftx(t)     # 
       손실은 2D 재투영, depth 표면, IMU, `W_BETA·|β|²`이다. 시작점은 G1 β와 그 β로 고른 프레임별 해이고, 끝에 새 β로 후보를 다시 푼다.
       손가락 θ는 어느 쪽이든 G1 값 그대로다(15).
     - 가정: depth는 장갑 표면이다. `--glove-thickness-mm 0`이면 영상 β가 장갑 두께만큼 손을 키운다(`docs/TODO.md` 장갑 두께).
+17. **캘리브 다시 저장** (2026-10-29, 사용자 결정): 사용자 말은 "기존의 캘리브레이션 정보는 모두 지우고, 새로 업로드한 3개의 파일을 캘리브레이션으로 다시 저장해. 그리고 그 정보를 사용해서 파이프라인 전체를 진행해. 캘리브레이션 정보는 gt니까 수정하면 안돼."였다.
+    - `calibration/`에는 사용자가 올린 `w2c_ext.npz`, `t2r_ext.npz`, `mocap2cam.npy`만 `20261015/`로 둔다. `20260824_v2`와 두 `provenance.json`은 지웠다.
+    - 세 파일은 지우기 전 `20261015` 파일과 sha256이 같다. 이 캘리브로 `20261022_163051`의 전체 파이프라인을 다시 돌렸다(E014).
+    - 캘리브는 GT라서 읽기만 한다. 어긋나면 보고만 한다(M4).
 
 미결:
 - D. **물체**: 다음 주 실험에서 정해진다. 물체 종류, CAD·마커 오프셋 유무에 따라 M5 분할의 물체 제거와 M9 범위가 정해진다.
