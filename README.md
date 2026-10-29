@@ -15,6 +15,7 @@ Wuji Glove + 4뷰 RealSense RGB-D + OptiTrack(물체) 녹화에서 오른손의 
 | 경로 | 내용 |
 |---|---|
 | `plan.md` | 목표, 마일스톤, 완료 조건, 결정 사항 |
+| `ANNOTATION.md` | 녹화 폴더 → 물체에 닿게 보정한 손(`contact`)까지의 입력 위치, 명령, 결과 키 |
 | `RECORDING.md` | 녹화 PC 운영 절차 (설치, 네트워크, 캘리브레이션, 녹화, 문제 해결) |
 | `docs/` | 구조(`ARCHITECTURE.md`), 미해결 항목(`TODO.md`), 실험 기록(`experiments/`) |
 | `calibration/<name>/` | 리그 캘리브 파일 (커밋, GT라서 읽기만 한다). 현재 `20261015`: 사용자가 올린 `w2c_ext.npz`, `t2r_ext.npz`, `mocap2cam.npy`만 둔다(2026-10-29) |
@@ -118,6 +119,8 @@ ln -sfn /home/user/wj/hamer_data/_DATA/data/mano_mean_params.npz assets/hamer/da
 `MANO_RIGHT.pkl`은 md5 `fd5a9d35…`다. 예전 위치 `/mnt/EvalAI/assets/mano`는 2026-10-16 현재 마운트되어 있지 않다.
 
 ## 분석 파이프라인
+
+녹화 폴더에서 물체에 닿게 보정한 손(`contact`)까지 만드는 공유용 안내(입력 위치, 명령, 결과 키)는 [ANNOTATION.md](ANNOTATION.md)에 있다.
 
 stage마다 출력이 있으면 재사용하고, `--force`로 다시 만든다(`--force`이면 그 stage 출력을 비우고 시작한다). 모두 env `wuji_ros`에서 돈다. `segment`부터는 세션의 캘리브(`wuji_ros/rig.py: SESSION_CALIBRATION`)가 필요하다.
 
