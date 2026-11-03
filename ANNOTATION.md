@@ -30,22 +30,33 @@ cd /home/user/wj/wuji_ros   # 분석 서버. 다른 PC는 clone한 폴더 (아�
 - 디스크: HaMeR 압축 파일 6.0 GB(풀고 나면 지워도 된다), 풀린 checkpoint 2.6 GB, conda env.
 - 녹화 PC와 같은 PC라면 녹화 중에는 돌리지 않는다. CPU·GPU·디스크를 많이 쓴다.
 
+새 PC에서는 분석 서버에 SSH로 접속할 수 없다. 서버의 파일(MANO, 테스트 녹화)은 USB 등으로 직접 옮긴다.
+
+1. clone:
+
 ```bash
 git clone https://github.com/jinmiles/wuji_ros.git
 cd wuji_ros
-bash scripts/shells/setup_annotation.sh --from user@<분석 서버 주소>:/home/user/wj/wuji_ros
+mkdir -p assets/mano
+```
+
+2. MANO: `MANO_RIGHT.pkl`은 라이선스 때문에 저장소에 없다.
+   - 분석 서버의 `/home/user/wj/wuji_ros/assets/mano/MANO_RIGHT.pkl`을 옮기거나, MANO 사이트(https://mano.is.tue.mpg.de, 가입 후 라이선스 동의)에서 받는다.
+   - clone한 폴더의 `assets/mano/MANO_RIGHT.pkl`에 둔다. md5는 `fd5a9d35f914987cf1cc04ffe338caa1`이어야 한다.
+   - `assets/`는 git이 무시하는 폴더라 커밋되지 않는다.
+3. 설치:
+
+```bash
+bash scripts/shells/setup_annotation.sh
 ```
 
 마지막 줄에 `annotation env ok`가 나오면 된다. 중간에 멈추면 원인을 고치고 같은 명령을 다시 실행한다. 이미 끝난 단계는 건너뛴다.
 
 `setup_annotation.sh`가 하는 일:
-1. HaMeR 코드: `third_party/hamer` submodule만 받는다. `third_party/wuji-sdk`는 녹화 브리지용이라 분석에는 필요 없다.
-2. conda env: `environment.yml`로 `wuji_ros` env를 만들고 chumpy를 따로 설치한다.
-3. HaMeR checkpoint: 공식 demo 데이터(6.0 GB)를 `scratch/`에 받는다. 필요한 것만 `assets/hamer/`로 옮기고 압축 파일은 지운다.
-4. MANO: `MANO_RIGHT.pkl`은 라이선스 때문에 저장소에 없다.
-   - `--from`의 `assets/mano/MANO_RIGHT.pkl`을 scp로 복사하고 md5(`fd5a9d35f914987cf1cc04ffe338caa1`)를 확인한다. 다르면 멈춘다.
-   - HaMeR도 같은 파일을 쓴다(`assets/hamer/data/mano` 링크).
-   - 분석 서버에 접속할 수 없으면 MANO 사이트(https://mano.is.tue.mpg.de, 가입 후 라이선스 동의)에서 받거나 USB로 옮긴다. 파일을 `assets/mano/MANO_RIGHT.pkl`에 두고 `--from` 없이 실행한다.
+1. MANO: `assets/mano/MANO_RIGHT.pkl`이 없거나 md5가 다르면 오래 걸리는 단계 전에 바로 멈춘다. HaMeR도 같은 파일을 쓴다(`assets/hamer/data/mano` 링크).
+2. HaMeR 코드: `third_party/hamer` submodule만 받는다. `third_party/wuji-sdk`는 녹화 브리지용이라 분석에는 필요 없다.
+3. conda env: `environment.yml`로 `wuji_ros` env를 만들고 chumpy를 따로 설치한다.
+4. HaMeR checkpoint: 공식 demo 데이터(6.0 GB)를 `scratch/`에 받는다. 필요한 것만 `assets/hamer/`로 옮기고 압축 파일은 지운다.
 5. 확인: env의 패키지를 import해 `2.0.1+cu118 True 1.23.5`(torch, CUDA 사용 가능, numpy)인지 보고, checkpoint와 MANO 파일이 있는지 본다.
 
 - 스크립트는 `annotate.sh`와 같이 `PYTHONNOUSERSITE=1`, `unset PYTHONPATH`로 실행한다.
@@ -63,7 +74,9 @@ assets/hamer/hamer_ckpts/model_config.yaml, dataset_config.yaml, checkpoints/ham
 첫 실행:
 - 녹화 데이터를 아래 "입력 데이터 위치"대로 두고 `./annotate.sh`를 돌린다.
 - 분석 서버의 `20261022_163051`을 복사해 돌렸다면 분석 서버 결과와 비교한다.
-  - 복사: `rsync -a --exclude '*.zip' --exclude t2r_ext.npz user@<분석 서버 주소>:/home/user/wj/wuji_ros/data/brl_mocap_cam_hand/ data/brl_mocap_cam_hand/`
+  - 복사: 분석 서버 `/home/user/wj/wuji_ros/data/brl_mocap_cam_hand/`의 네 파일을 USB 등으로 새 PC의 `data/brl_mocap_cam_hand/`에 옮긴다.
+    - `20261022_163051_mocap_mk4_wuji_fixed_rate.zip`(2.1 GB), `config_rerun_object_mk4_wuji.yaml`, `01_Hexagonal_Prism_with_tracker.stl`, `w2c_ext.npz`
+    - 그 폴더에서 zip을 푼다(`unzip 20261022_163051_mocap_mk4_wuji_fixed_rate.zip`). 녹화 폴더가 그대로 나온다.
   - `output/<세션>/contact/summary.json`의 `held_frames`가 25개인지 본다.
   - 로그의 물체 "CAD fit RMSE"가 0.30 mm인지 본다.
 - GPU가 달라 숫자가 조금 다를 수 있다.
