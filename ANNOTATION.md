@@ -30,51 +30,26 @@ cd /home/user/wj/wuji_ros   # 분석 서버. 다른 PC는 clone한 폴더 (아�
 - 디스크: HaMeR 압축 파일 6.0 GB(풀고 나면 지워도 된다), 풀린 checkpoint 2.6 GB, conda env.
 - 녹화 PC와 같은 PC라면 녹화 중에는 돌리지 않는다. CPU·GPU·디스크를 많이 쓴다.
 
-모두 같은 터미널에서 순서대로 실행한다. 처음 두 줄은 녹화 PC용 설정이다.
-- `PYTHONNOUSERSITE=1`: 브리지용 user site 패키지(`~/.local/lib/python3.10`)가 env보다 먼저 읽히지 않게 한다.
-- `unset PYTHONPATH`: ROS 2를 source한 터미널의 PYTHONPATH를 지운다.
-- 다른 PC에서도 해가 없다. `annotate.sh`는 실행할 때 이 두 가지를 스스로 한다.
-
 ```bash
-export PYTHONNOUSERSITE=1
-unset PYTHONPATH
-
-# 1. 저장소와 HaMeR 코드 (third_party/wuji-sdk는 녹화 브리지용이라 분석에는 필요 없다)
 git clone https://github.com/jinmiles/wuji_ros.git
 cd wuji_ros
-git submodule update --init third_party/hamer
-
-# 2. conda env
-conda env create -f environment.yml
-conda run --no-capture-output -n wuji_ros python -m pip install --no-build-isolation \
-    "chumpy @ git+https://github.com/mattloper/chumpy@580566eafc9ac68b2614b64d6f7aaa84eebb70da"
-
-# 3. HaMeR checkpoint (공식 demo 데이터에서 필요한 것만)
-mkdir -p assets/mano assets/hamer/data
-wget -P scratch https://www.cs.utexas.edu/~pavlakos/hamer/data/hamer_demo_data.tar.gz
-tar --warning=no-unknown-keyword --exclude=".*" -xzf scratch/hamer_demo_data.tar.gz -C scratch \
-    _DATA/hamer_ckpts _DATA/data/mano_mean_params.npz
-mv scratch/_DATA/hamer_ckpts assets/hamer/hamer_ckpts
-mv scratch/_DATA/data/mano_mean_params.npz assets/hamer/data/
-rm -r scratch/_DATA scratch/hamer_demo_data.tar.gz
+bash scripts/shells/setup_annotation.sh --from user@<분석 서버 주소>:/home/user/wj/wuji_ros
 ```
 
+마지막 줄에 `annotation env ok`가 나오면 된다. 중간에 멈추면 원인을 고치고 같은 명령을 다시 실행한다. 이미 끝난 단계는 건너뛴다.
+
+`setup_annotation.sh`가 하는 일:
+1. HaMeR 코드: `third_party/hamer` submodule만 받는다. `third_party/wuji-sdk`는 녹화 브리지용이라 분석에는 필요 없다.
+2. conda env: `environment.yml`로 `wuji_ros` env를 만들고 chumpy를 따로 설치한다.
+3. HaMeR checkpoint: 공식 demo 데이터(6.0 GB)를 `scratch/`에 받는다. 필요한 것만 `assets/hamer/`로 옮기고 압축 파일은 지운다.
 4. MANO: `MANO_RIGHT.pkl`은 라이선스 때문에 저장소에 없다.
-   - MANO 사이트(https://mano.is.tue.mpg.de, 가입 후 라이선스 동의)에서 받거나, 분석 서버의 `/home/user/wj/wuji_ros/assets/mano/MANO_RIGHT.pkl`을 복사한다.
-   - 복사한 파일은 `assets/mano/MANO_RIGHT.pkl`에 둔다. HaMeR도 같은 파일을 쓴다.
+   - `--from`의 `assets/mano/MANO_RIGHT.pkl`을 scp로 복사하고 md5(`fd5a9d35f914987cf1cc04ffe338caa1`)를 확인한다. 다르면 멈춘다.
+   - HaMeR도 같은 파일을 쓴다(`assets/hamer/data/mano` 링크).
+   - 분석 서버에 접속할 수 없으면 MANO 사이트(https://mano.is.tue.mpg.de, 가입 후 라이선스 동의)에서 받거나 USB로 옮긴다. 파일을 `assets/mano/MANO_RIGHT.pkl`에 두고 `--from` 없이 실행한다.
+5. 확인: env의 패키지를 import해 `2.0.1+cu118 True 1.23.5`(torch, CUDA 사용 가능, numpy)인지 보고, checkpoint와 MANO 파일이 있는지 본다.
 
-```bash
-ln -sfn ../../mano assets/hamer/data/mano
-md5sum assets/mano/MANO_RIGHT.pkl   # fd5a9d35f914987cf1cc04ffe338caa1
-```
-
-5. 확인: 아래가 `2.0.1+cu118 True 1.23.5`를 출력하고, 두 파일이 보이면 된다.
-
-```bash
-conda run --no-capture-output -n wuji_ros python -c \
-    "import torch, smplx, chumpy, pytorch_lightning, cv2, trimesh, numpy; print(torch.__version__, torch.cuda.is_available(), numpy.__version__)"
-ls -lL assets/hamer/hamer_ckpts/checkpoints/hamer.ckpt assets/hamer/data/mano/MANO_RIGHT.pkl
-```
+- 스크립트는 `annotate.sh`와 같이 `PYTHONNOUSERSITE=1`, `unset PYTHONPATH`로 실행한다.
+  녹화 PC의 브리지용 user site 패키지(`~/.local/lib/python3.10`)와 ROS 2를 source한 터미널의 PYTHONPATH가 env보다 먼저 읽히지 않게 한다. 다른 PC에서도 해가 없다.
 
 설치 후 `assets/`는 다음과 같다(git이 무시하는 폴더).
 
@@ -85,12 +60,13 @@ assets/hamer/data/mano_mean_params.npz
 assets/hamer/hamer_ckpts/model_config.yaml, dataset_config.yaml, checkpoints/hamer.ckpt
 ```
 
-6. 첫 실행:
-   - 녹화 데이터를 아래 "입력 데이터 위치"대로 두고 `./annotate.sh`를 돌린다.
-   - `20261022_163051`을 복사해 돌렸다면 분석 서버 결과와 비교한다.
-     - `output/<세션>/contact/summary.json`의 `held_frames`가 25개인지 본다.
-     - 로그의 물체 "CAD fit RMSE"가 0.30 mm인지 본다.
-   - GPU가 달라 숫자가 조금 다를 수 있다.
+첫 실행:
+- 녹화 데이터를 아래 "입력 데이터 위치"대로 두고 `./annotate.sh`를 돌린다.
+- 분석 서버의 `20261022_163051`을 복사해 돌렸다면 분석 서버 결과와 비교한다.
+  - 복사: `rsync -a --exclude '*.zip' --exclude t2r_ext.npz user@<분석 서버 주소>:/home/user/wj/wuji_ros/data/brl_mocap_cam_hand/ data/brl_mocap_cam_hand/`
+  - `output/<세션>/contact/summary.json`의 `held_frames`가 25개인지 본다.
+  - 로그의 물체 "CAD fit RMSE"가 0.30 mm인지 본다.
+- GPU가 달라 숫자가 조금 다를 수 있다.
 
 ## 입력 데이터 위치
 

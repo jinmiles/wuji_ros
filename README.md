@@ -20,7 +20,7 @@ Wuji Glove + 4뷰 RealSense RGB-D + OptiTrack(물체) 녹화에서 오른손의 
 | `docs/` | 구조(`ARCHITECTURE.md`), 미해결 항목(`TODO.md`), 실험 기록(`experiments/`) |
 | `calibration/<name>/` | 리그 캘리브 파일 (커밋, GT라서 읽기만 한다). 현재 `20261015`: 사용자가 올린 `w2c_ext.npz`, `t2r_ext.npz`, `mocap2cam.npy`만 둔다(2026-10-29) |
 | `wuji_ros/` | 파이썬 패키지. 현재 `bridge/`(glove → ROS2) |
-| `scripts/` | entrypoint. 현재 `glove_bridge.py`, 녹화 PC용 `shells/{setup_bridge,glove_bridge,record_glove}.sh` |
+| `scripts/` | entrypoint. 현재 `glove_bridge.py`, 녹화 PC용 `shells/{setup_bridge,glove_bridge,record_glove}.sh`, 새 분석 PC용 `shells/setup_annotation.sh` |
 | `tests/` | 데이터·계약 테스트 |
 | `environment.yml` | 분석 env `wuji_ros` 정의 |
 | `requirements-bridge.txt` | 녹화 PC 브리지 의존성 (`python3.10 --user`) |
