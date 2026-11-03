@@ -35,10 +35,10 @@ extract → segment(table, depth+RGB box) → G1 → keypoints(HaMeR, IMU 손 �
 | `wuji_ros/mano.py` | MANO forward, OpenPose-21 관절 순서 (구현됨) |
 | `wuji_ros/glovefit.py` | G1, glove IMU 자세의 world 변환(`waist_in_world`, `keypoints`·`fit4` 공용) (구현됨) |
 | `wuji_ros/handfit.py` | V1 카메라별(`fit`)과 4뷰 world(`fit4`) (구현됨). `fit4`는 glove 융합 IMU 자세 항(기울기 + 세션 yaw, 기본 가중치 100)과 IMU 시작점, 2D 라벨 거울 가설(손바닥/손등 뒤집힘 대응)을 쓴다. β(손 크기)는 기본으로 G1 β다(`--shape glove`, 2026-10-27). `--shape image`는 세션의 모든 프레임으로 β 하나를 영상으로 푼다. 카메라별 `fit`은 늘 G1 β다. V2(손가락 미세조정)는 하지 않는다 |
-| `wuji_ros/annotate.py`, `annotate.sh` | 녹화 폴더 하나 → `import`부터 `contact`, 오버레이 3종, `tactile`까지 (`scripts/run.py annotate`). yaml과 STL은 폴더 옆에서 찾는다. 캘리브는 `--calibration` → `rig.SESSION_CALIBRATION` → 녹화와 같이 온 `w2c_ext.npz`와 sha256이 같은 캘리브 순서로 정해 `manifest.json`에 남기고, `rig.rig_for`가 그것을 읽는다. 추정하지 않는다 (구현됨, 2026-10-29) |
+| `wuji_ros/annotate.py`, `annotate.sh` | 녹화 폴더 하나 → `import`부터 `contact`, 오버레이 3종, `tactile`, `tactile_hand`까지 (`scripts/run.py annotate`). yaml과 STL은 폴더 옆에서 찾는다. 캘리브는 `--calibration` → `rig.SESSION_CALIBRATION` → 녹화와 같이 온 `w2c_ext.npz`와 sha256이 같은 캘리브 순서로 정해 `manifest.json`에 남기고, `rig.rig_for`가 그것을 읽는다. 추정하지 않는다 (구현됨, 2026-10-29) |
 | `wuji_ros/contactfit.py` | stage `contact`(plan.md §6 18): 물체를 쥔 프레임에서 `fit4` 손을 위치만 옮겨, 물체에 닿고 관통하지 않게 하는 가장 작은 이동을 구한다. 손가락·β·회전은 그대로다. 물체 mesh의 정확한 부호 거리(점-삼각형 거리, 일반화 winding number 부호)를 몸체마다 구해 최솟값을 쓴다. 안쪽으로 감긴 몸체(속이 빈 기둥의 내벽)는 뺀다. 물체 자세가 solver 입력이므로 독립 검증은 재투영과 depth 표면이다 (구현됨, 2026-10-29) |
 | `wuji_ros/objectpose.py` | mocap 물체 자세: 수집기 yaml의 `marker_offsets`(OBJ 좌표, 마커 이름으로 대응)를 기록된 마커에 Kabsch로 맞춘 `T_mocap_from_obj`, STL mesh (구현됨, 2026-10-29). M5 물체 점 제거와 M9 관통·접촉에서 다시 쓴다 |
-| `wuji_ros/viz.py` | 카메라 overlay(손 mesh + MANO 골격), `--object-config/--object-mesh`이면 mocap 물체 mesh도 같은 깊이 순서로 그려 `overlay_object/`에 둔다. 촉각 맵 별도 시퀀스. 각각 H.264(yuv444p) mp4 + gif (구현됨) |
+| `wuji_ros/viz.py` | 카메라 overlay(손 mesh + MANO 골격), `--object-config/--object-mesh`이면 mocap 물체 mesh도 같은 깊이 순서로 그려 `overlay_object/`에 둔다. 촉각 맵 별도 시퀀스, `tactile --on-hand`는 taxel을 `fit4` 손 메시 위에 그린 `tactile_hand/`(펼친 손, 손바닥 쪽, 엄지 쪽; 2026-11-03). 각각 H.264(yuv444p) mp4 + gif (구현됨) |
 | `wuji_ros/evaluate.py` | 일치도 지표, 프레임별 라벨 |
 | `wuji_ros/cli.py`, `scripts/run.py` | 분석 entrypoint, 단계별 subcommand, `--force` (구현됨) |
 | `scripts/glove_bridge.py` | 브리지 entrypoint (구현됨) |

@@ -13,6 +13,7 @@ Stages and their environments (README "환경"):
     overlay    MANO mesh + skeleton in every view        wuji_ros
                (+ the mocap-posed object: overlay_object)
     tactile    glove tactile map per frame               wuji_ros
+               (--on-hand: taxels on the fit4 hand, tactile_hand)
     annotate   one recording folder -> all of the above up to contact, every overlay
 """
 
@@ -109,6 +110,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("tactile", help="the glove's tactile map per frame, mp4 + gif")
     _session_args(p)
     p.add_argument("--fps", type=float, default=2.0, help="playback rate in sequence order")
+    p.add_argument("--on-hand", action="store_true",
+                   help="the taxels (raw pressure) on the fit4 MANO hand instead: rest pose from the palm, posed hand "
+                        "from the palm and the thumb side, into output/<session>/tactile_hand/")
 
     p = sub.add_parser("overlay", help="draw the fitted hand (mesh + skeleton) into every full camera frame")
     _session_args(p)
@@ -162,8 +166,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         from .calibcheck import run
         run(args.session)
     elif args.command == "tactile":
-        from .viz import run_tactile
-        run_tactile(args.session, fps=args.fps, force=args.force)
+        from .viz import run_tactile, run_tactile_hand
+        (run_tactile_hand if args.on_hand else run_tactile)(args.session, fps=args.fps, force=args.force)
     elif args.command == "overlay":
         if (args.object_config is None) != (args.object_mesh is None):
             parser.error("--object-config and --object-mesh go together")

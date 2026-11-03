@@ -1,7 +1,8 @@
 """One recording folder -> every stage up to the contact hand, and every overlay (ANNOTATION.md).
 
     import -> segment -> glovefit -> keypoints -> fit4 -> contact
-           -> overlay (fit4 hand), overlay_object (+ object), overlay_contact_object (contact hand + object), tactile
+           -> overlay (fit4 hand), overlay_object (+ object), overlay_contact_object (contact hand + object), tactile,
+              tactile_hand (taxels on the hand)
 
 The session is the folder's name. Unless given, the collector's rerun yaml (camera intrinsics and the
 object's marker offsets) and the object mesh are the only *.yaml and *.stl next to the folder (its parent).
@@ -89,3 +90,4 @@ def run(src: Path, camera_config: Optional[Path] = None, object_mesh: Optional[P
     viz.run(session, object_config=camera_config, object_mesh=object_mesh, force=force)
     viz.run(session, object_config=camera_config, object_mesh=object_mesh, hand="contact", force=force)
     viz.run_tactile(session, force=force)
+    viz.run_tactile_hand(session, force=force)

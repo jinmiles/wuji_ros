@@ -14,10 +14,10 @@ cd /home/user/wj/wuji_ros
 - 여러 GPU 중 하나를 고르려면 앞에 `CUDA_VISIBLE_DEVICES=0`을 붙인다.
 - 로그를 남기려면 뒤에 `> annotate.log 2>&1`을 붙인다.
 - 단계별 출력이 이미 있으면 그 단계는 건너뛴다. 처음부터 다시 만들려면 `--force`를 붙인다.
-- `20261022_163051`(0.5 s 간격 50프레임)은 RTX 3090 한 장에서 약 7–8분 걸린다(손 단계 약 5분, 오버레이 3종과 촉각 약 2.5분).
+- `20261022_163051`(0.5 s 간격 50프레임)은 RTX 3090 한 장에서 약 8–9분 걸린다(손 단계 약 5분, 오버레이 3종과 촉각 2종 약 3분. 손 메시 위 촉각은 41 s).
 - 옵션은 기본값이 맞지 않을 때만 쓴다: `--camera-config YAML`, `--object-mesh STL`, `--calibration NAME`, `--every 초`.
 
-실행 순서: `import → segment → glovefit → keypoints → fit4 → contact → overlay(손) → overlay(손 + 물체) → overlay(보정한 손 + 물체) → tactile`. 단계를 하나씩 돌리는 명령은 README "분석 파이프라인"에 있다.
+실행 순서: `import → segment → glovefit → keypoints → fit4 → contact → overlay(손) → overlay(손 + 물체) → overlay(보정한 손 + 물체) → tactile → tactile(손 메시 위)`. 단계를 하나씩 돌리는 명령은 README "분석 파이프라인"에 있다.
 
 ## 준비
 
@@ -60,7 +60,8 @@ wuji_ros/
 | `overlay_contact_object/`, `overlay_contact_object.{mp4,gif}` | 보정한 손 + 물체 |
 | `overlay_object/`, `overlay_object.{mp4,gif}` | 보정 전(`fit4`) 손 + 물체 |
 | `overlay/`, `overlay.{mp4,gif}` | 보정 전 손만 |
-| `tactile/`, `tactile.{mp4,gif}` | 장갑 촉각 맵 |
+| `tactile/`, `tactile.{mp4,gif}` | 장갑 촉각 맵 (24×31) |
+| `tactile_hand/`, `tactile_hand.{mp4,gif}` | 촉각 taxel을 `fit4` 손 메시 위에 그린 것. 펼친 손(손바닥), 자세 그대로(손바닥 쪽, 엄지 쪽). 압력은 SDK 값 그대로 |
 | `fit4/`, `glovefit/`, `keypoints/`, `segment/`, `scene/` | 중간 단계 출력 |
 
 오버레이에 참가자 얼굴이 보이므로 공유할 때 주의한다.

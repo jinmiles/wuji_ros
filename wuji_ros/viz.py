@@ -11,12 +11,15 @@ overlay  2x2 montage of the four whole camera frames (camera1 camera2 / camera3
 tactile  The glove's 24x31 tactile map per frame (pressure colour, grey = invalid
          taxel, white box = binary contact) with each zone's maximum, on its own,
          so it never covers the camera images.
+         --on-hand (stage tactile_hand): the taxels on the fit4 MANO hand instead,
+         raw pressure, in hand-fixed views (run_tactile_hand).
 The source filename and the numbers go in a strip under the image, not on it.
 
     output/<session>/overlay/NNNNNN.jpg, overlay.mp4, overlay.gif
     output/<session>/overlay_object/NNNNNN.jpg, overlay_object.mp4, overlay_object.gif
     output/<session>/overlay_contact_object/NNNNNN.jpg, overlay_contact_object.mp4, overlay_contact_object.gif
     output/<session>/tactile/NNNNNN.jpg, tactile.mp4, tactile.gif
+    output/<session>/tactile_hand/NNNNNN.jpg, tactile_hand.mp4, tactile_hand.gif
 """
 
 from __future__ import annotations
@@ -28,6 +31,7 @@ from typing import List, Optional, Sequence, Tuple
 
 import cv2
 import numpy as np
+import trimesh
 
 from . import handfit
 from .bagio import TACTILE_ZONES, Session
@@ -287,3 +291,145 @@ def run_tactile(session: str, fps: float = 2.0, force: bool = False) -> None:
         cv2.imwrite(str(target), np.vstack([img, _strip(img.shape[1], lines)]), [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
     if written:
         write_media(written, OUTPUT_DIR / session / "tactile.mp4", OUTPUT_DIR / session / "tactile.gif", fps)
+
+
+TACTILE_VIEW_PX = 600  # square hand view
+TACTILE_PX_PER_MM = 2.6  # one scale for every frame and view
+TAXEL_RADIUS_PX = 4
+TAXEL_LIFT_M = 1e-3  # taxels sit this far out along their face's normal, in front of it
+
+
+def _surface_points(verts: np.ndarray, faces: np.ndarray, points: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """Each point's closest point on the mesh, as (face index (N,), barycentric (N,3)); exhaustive over faces."""
+    tri = verts[faces]
+    cp = trimesh.triangles.closest_point(np.tile(tri, (len(points), 1, 1)), np.repeat(points, len(faces), axis=0))
+    cp = cp.reshape(len(points), len(faces), 3)
+    fi = np.linalg.norm(cp - points[:, None], axis=2).argmin(1)
+    return fi, trimesh.triangles.points_to_barycentric(tri[fi], cp[np.arange(len(points)), fi])
+
+
+def _on_faces(verts: np.ndarray, faces: np.ndarray, fi: np.ndarray, bary: np.ndarray, lift: float) -> np.ndarray:
+    tri = verts[faces[fi]]
+    n = np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])
+    return (bary[:, :, None] * tri).sum(1) + lift * n / np.linalg.norm(n, axis=1, keepdims=True)
+
+
+def _hand_views(joints: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """R_cam_from_world of the palm view and the thumb-side view, fingers up. The palm normal
+    (index MCP - wrist) x (pinky MCP - wrist) points out of the right palm (every taxel is on that side)."""
+    up = joints[9] - joints[0]
+    up /= np.linalg.norm(up)
+    n = np.cross(joints[5] - joints[0], joints[17] - joints[0])
+    n -= (n @ up) * up
+    n /= np.linalg.norm(n)
+    across = joints[17] - joints[5]  # index -> pinky: the thumb-side camera looks this way
+    across -= (across @ up) * up + (across @ n) * n
+    across /= np.linalg.norm(across)
+
+    def look(z):
+        y = -up  # image rows run towards the wrist
+        return np.stack([np.cross(y, z), y, z])
+
+    return look(-n), look(across)
+
+
+def _tactile_view(verts: np.ndarray, faces: np.ndarray, taxels: np.ndarray, taxel_face: np.ndarray,
+                  pressure: np.ndarray, R: np.ndarray, title: str) -> np.ndarray:
+    """Orthographic view (camera <- world rotation R): the shaded mesh and the taxels as pressure dots, in one
+    far-to-near order; a taxel whose face turns away from the camera is not drawn."""
+    X, T = verts @ R.T, taxels @ R.T
+    centre = (X.min(0) + X.max(0)) / 2
+
+    def px(P):
+        return np.round(((P[:, :2] - centre[:2]) * TACTILE_PX_PER_MM * 1e3 + TACTILE_VIEW_PX / 2) * 4).astype(np.int32)
+
+    tri = X[faces]
+    n = np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])
+    n /= np.linalg.norm(n, axis=1, keepdims=True)
+    depth = tri[:, :, 2].mean(1)
+    shown = np.nonzero(n[taxel_face, 2] < 0)[0]  # outward normal towards the camera (-z)
+    keys = np.concatenate([depth, np.minimum(T[shown, 2], depth[taxel_face[shown]] - 1e-6)])
+    uv_f, uv_t = px(X), px(T)
+    colors = _pressure_bgr(pressure)
+    img = np.full((TACTILE_VIEW_PX, TACTILE_VIEW_PX, 3), 255, np.uint8)
+    for k in np.argsort(-keys, kind="stable"):  # far to near
+        if k < len(faces):
+            cv2.fillConvexPoly(img, uv_f[faces[k]], [0.85 * (80 + 175 * abs(n[k, 2]))] * 3, lineType=cv2.LINE_AA, shift=2)
+        else:
+            i = shown[k - len(faces)]
+            cv2.circle(img, tuple(uv_t[i]), TAXEL_RADIUS_PX * 4, colors[i].tolist(), -1, cv2.LINE_AA, shift=2)
+    cv2.putText(img, title, (12, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 0, 0), 2, cv2.LINE_AA)
+    return img
+
+
+def _pressure_bar(width: int) -> np.ndarray:
+    bar = np.full((56, width, 3), 255, np.uint8)
+    x0, x1 = 160, width - 60
+    bar[10:30, x0:x1] = _pressure_bgr(np.linspace(0, 1, x1 - x0))[None]
+    cv2.putText(bar, "pressure", (14, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 0, 0), 2, cv2.LINE_AA)
+    for v in (0.0, 0.5, 1.0):
+        cv2.putText(bar, f"{v:g}", (x0 + int(v * (x1 - x0)) - 8, 52), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 1, cv2.LINE_AA)
+    return bar
+
+
+def run_tactile_hand(session: str, fps: float = 2.0, force: bool = False) -> None:
+    """Stage `tactile_hand`: each frame's taxels (the SDK's tactile_point_cloud, raw pressure) on the fit4 hand.
+
+    The taxels (r_wrist) go to world by fit4's T_world_from_wrist and onto their closest MANO face. The
+    same face and barycentric put them on the session-beta MANO in the rest pose (fingers straight), seen
+    from the palm; the posed hand is seen from the palm and from the thumb side. contact moves the hand
+    and its wrist frame together, so its views would be the same.
+    """
+    import torch
+
+    from .mano import Mano
+
+    s = Session(session)
+    out = stage_dir(session, "tactile_hand")
+    out.mkdir(parents=True, exist_ok=True)
+    mano = Mano("cpu")
+    faces = mano.faces
+    eye = torch.eye(3)
+    rest = {}
+    written, dist_mm = [], []
+    for f in s.frame_ids:
+        world, glove = handfit.load_world(session, f), s.glove(f)
+        if world is None or glove is None or "tactile_points" not in glove:
+            continue
+        target = out / f"{frame_name(f)}.jpg"
+        written.append(target)
+        if target.is_file() and not force:
+            continue
+        key = world["betas"].tobytes()
+        if key not in rest:
+            with torch.no_grad():
+                Vr, Jr = mano(torch.tensor(world["betas"], dtype=torch.float32)[None], eye[None],
+                              eye.expand(1, 15, 3, 3), torch.zeros(1, 3))
+            rest[key] = (Vr[0].double().numpy(), Jr[0].double().numpy())
+        V_rest, J_rest = rest[key]
+        V, T = world["verts_world"], world["T_world_from_wrist"]
+        P = glove["tactile_points"] @ T[:3, :3].T + T[:3, 3]
+        p = glove["tactile_pressure"]
+        fi, bary = _surface_points(V, faces, P)
+        d = np.linalg.norm(P - _on_faces(V, faces, fi, bary, 0.0), axis=1) * 1e3
+        dist_mm.append(np.median(d))
+        ok = p >= 0  # -1 = invalid taxel
+        palm, side = _hand_views(world["joints_world"])
+        posed = _on_faces(V, faces, fi, bary, TAXEL_LIFT_M)[ok]
+        views = [_tactile_view(V_rest, faces, _on_faces(V_rest, faces, fi, bary, TAXEL_LIFT_M)[ok], fi[ok], p[ok],
+                               _hand_views(J_rest)[0], "rest pose (fingers straight), palm"),
+                 _tactile_view(V, faces, posed, fi[ok], p[ok], palm, "fit4 pose, palm side"),
+                 _tactile_view(V, faces, posed, fi[ok], p[ok], side, "fit4 pose, thumb side")]
+        img = np.hstack(views)
+        t = float(s.rows[f]["master_stamp"]) - float(s.rows[s.frame_ids[0]]["master_stamp"])
+        lines = [f"{session}  frame {frame_name(f)}.png   t={t:.1f}s",
+                 f"glove taxels (raw SDK pressure) on the fit4 MANO hand: {ok.sum()} drawn ({(~ok).sum()} invalid), "
+                 f"max {p[ok].max():.2f}",
+                 f"each on its closest MANO face: taxel -> surface {np.median(d):.1f}mm median, {d.max():.1f}mm max"]
+        cv2.imwrite(str(target), np.vstack([img, _pressure_bar(img.shape[1]), _strip(img.shape[1], lines)]),
+                    [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
+    if dist_mm:
+        LOGGER.info("%d frames: taxel -> fit4 MANO surface %.1f mm median of frame medians (max %.1f)", len(dist_mm),
+                    np.median(dist_mm), max(dist_mm))
+    if written:
+        write_media(written, OUTPUT_DIR / session / "tactile_hand.mp4", OUTPUT_DIR / session / "tactile_hand.gif", fps)

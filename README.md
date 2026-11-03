@@ -141,6 +141,7 @@ conda run --no-capture-output -n wuji_ros python scripts/run.py overlay   --sess
     --object-config data/brl_mocap_cam_hand/config_rerun_object_mk4_wuji.yaml \
     --object-mesh data/brl_mocap_cam_hand/01_Hexagonal_Prism_with_tracker.stl   # 손 + 물체: output/$S/overlay_object.{mp4,gif}
 conda run --no-capture-output -n wuji_ros python scripts/run.py tactile   --session $S   # output/$S/tactile.{mp4,gif}
+conda run --no-capture-output -n wuji_ros python scripts/run.py tactile   --session $S --on-hand   # 손 메시 위 taxel: output/$S/tactile_hand.{mp4,gif}
 ```
 
 bag이 아니라 다른 수집기가 고정 주기로 이미 뽑아 둔 폴더(`image_metadata.csv`, `camera*/{color,depth}/`, `wuji/`, `mocap/`, `wuji_info.json`)는 `extract` 대신 `import`로 같은 레이아웃을 만든다.
@@ -169,5 +170,6 @@ conda run --no-capture-output -n wuji_ros python scripts/run.py import data/brl_
 | `contact` | `contact/NNNNNN.npz`(`fit4`와 같은 키, 위치만 옮김) + `held`, `t_world`, `T_world_from_obj`, `obj_lift_mm`, 이동 전후 손-물체 최소 부호 거리·관통 정점 수·재투영·depth 표면, `summary.json`. 쥔 프레임(물체의 가장 낮은 점이 첫 프레임보다 5 mm 넘게 들려 있고 `fit4` 손이 20 mm 안. 옆에 내려놓거나 책상 위에서 돌리는 물체는 해당하지 않음)에서 손이 물체에 닿고 관통하지 않게 하는 가장 작은 이동이다. 손가락이 물체의 마주 보는 두 면을 뚫어 빠져나갈 방향이 없으면 400개 방향에서 빠져나오는 가장 작은 이동을 쓴다. 손가락·β·회전은 `fit4` 그대로다. `overlay --hand contact`로 그린다(`overlay_contact[_object]/`) |
 | `calib` | `calib/report.json` 테이블 평면, 카메라별 손목 일치 |
 | `tactile` | `tactile/NNNNNN.jpg`, `tactile.mp4`, `tactile.gif`. 24×31 촉각 맵(binary 접촉 표시)과 영역별 최댓값 |
+| `tactile --on-hand` | `tactile_hand/NNNNNN.jpg`, `tactile_hand.mp4`, `tactile_hand.gif`. SDK taxel 점(`tactile_point_cloud`, 압력 그대로)을 `fit4`의 `T_world_from_wrist`로 world에 옮겨 가장 가까운 MANO 면에 놓는다. 같은 면·무게중심 좌표로 세션 β의 펼친 손(손바닥 쪽)에도 놓고, 자세 그대로의 손은 손바닥 쪽과 엄지 쪽에서 본다. 손 고정 정사영, 모든 프레임 같은 배율. `contact`는 손과 손목 좌표계를 함께 옮기므로 그림이 같다 |
 | `overlay` | `overlay/NNNNNN.jpg`, `overlay.mp4`(H.264 yuv444p), `overlay.gif`. 카메라 위에는 손 mesh와 MANO 골격만 그린다. 재생은 추출 간격과 무관한 고정 `--fps`(프레임 순서) |
 | `overlay --object-config --object-mesh` | `overlay_object/NNNNNN.jpg`, `overlay_object.mp4`, `overlay_object.gif`. 손에 mocap 물체 mesh(노란색)를 더한다. 물체는 yaml `object.marker_offsets`(마커 이름으로 대응)를 기록된 마커에 Kabsch로 맞추고, 캘리브의 `mocap2cam.npy`로 camera1을 거쳐 world에 놓는다. 링크가 없는 캘리브에서는 멈춘다(추정하지 않음). yaml의 마커 이름 대응은 녹화마다 다르므로 로그의 CAD 맞춤 RMSE를 본다 |
