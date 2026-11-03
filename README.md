@@ -15,7 +15,7 @@ Wuji Glove + 4뷰 RealSense RGB-D + OptiTrack(물체) 녹화에서 오른손의 
 | 경로 | 내용 |
 |---|---|
 | `plan.md` | 목표, 마일스톤, 완료 조건, 결정 사항 |
-| `ANNOTATION.md`, `annotate.sh` | 녹화 폴더 하나 → 물체에 닿게 보정한 손(`contact`)과 오버레이 전부. 입력 위치, 명령, 결과 키 |
+| `ANNOTATION.md`, `annotate.sh` | 녹화 폴더 하나 → 물체에 닿게 보정한 손(`contact`)과 오버레이 전부. 새 PC(로봇룸 PC) 설치, 입력 위치, 명령, 결과 키 |
 | `RECORDING.md` | 녹화 PC 운영 절차 (설치, 네트워크, 캘리브레이션, 녹화, 문제 해결) |
 | `docs/` | 구조(`ARCHITECTURE.md`), 미해결 항목(`TODO.md`), 실험 기록(`experiments/`) |
 | `calibration/<name>/` | 리그 캘리브 파일 (커밋, GT라서 읽기만 한다). 현재 `20261015`: 사용자가 올린 `w2c_ext.npz`, `t2r_ext.npz`, `mocap2cam.npy`만 둔다(2026-10-29) |

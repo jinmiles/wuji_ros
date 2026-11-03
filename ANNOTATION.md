@@ -6,7 +6,7 @@
 ## 실행
 
 ```bash
-cd /home/user/wj/wuji_ros
+cd /home/user/wj/wuji_ros   # 분석 서버. 다른 PC는 clone한 폴더 (아래 "설치")
 ./annotate.sh data/brl_mocap_cam_hand/20261022_163051_mocap_mk4_wuji_fixed_rate
 ```
 
@@ -19,10 +19,78 @@ cd /home/user/wj/wuji_ros
 
 실행 순서: `import → segment → glovefit → keypoints → fit4 → contact → overlay(손) → overlay(손 + 물체) → overlay(보정한 손 + 물체) → tactile → tactile(손 메시 위)`. 단계를 하나씩 돌리는 명령은 README "분석 파이프라인"에 있다.
 
-## 준비
+## 설치 (로봇룸 PC 등 새 PC)
 
-- conda env `wuji_ros`, `assets/`의 MANO·HaMeR 링크: README "환경", "자산".
-- GPU 한 장. `keypoints`와 `fit4`는 CUDA로만 돈다.
+분석 서버(`/home/user/wj/wuji_ros`)에는 이미 설치되어 있다. 새 PC에서는 아래를 한 번만 한다.
+확인한 환경은 분석 서버(NVIDIA 드라이버 570, RTX 3090 24 GB)뿐이다. 더 작은 GPU에서는 아직 돌려 보지 않았다.
+
+필요한 것:
+- NVIDIA GPU와 드라이버. `keypoints`(HaMeR)와 `fit4`는 CUDA로만 돈다. env의 torch가 CUDA 11.8 빌드이므로 `nvidia-smi`의 "CUDA Version"이 11.8 이상이어야 한다.
+- conda(Miniconda 또는 Anaconda), git, ffmpeg(`sudo apt install ffmpeg`). ffmpeg가 없으면 mp4/gif는 건너뛰고 jpg만 남는다.
+- 디스크: HaMeR 압축 파일 6.0 GB(풀고 나면 지워도 된다), 풀린 checkpoint 2.6 GB, conda env.
+- 녹화 PC와 같은 PC라면 녹화 중에는 돌리지 않는다. CPU·GPU·디스크를 많이 쓴다.
+
+모두 같은 터미널에서 순서대로 실행한다. 처음 두 줄은 녹화 PC용 설정이다.
+- `PYTHONNOUSERSITE=1`: 브리지용 user site 패키지(`~/.local/lib/python3.10`)가 env보다 먼저 읽히지 않게 한다.
+- `unset PYTHONPATH`: ROS 2를 source한 터미널의 PYTHONPATH를 지운다.
+- 다른 PC에서도 해가 없다. `annotate.sh`는 실행할 때 이 두 가지를 스스로 한다.
+
+```bash
+export PYTHONNOUSERSITE=1
+unset PYTHONPATH
+
+# 1. 저장소와 HaMeR 코드 (third_party/wuji-sdk는 녹화 브리지용이라 분석에는 필요 없다)
+git clone https://github.com/jinmiles/wuji_ros.git
+cd wuji_ros
+git submodule update --init third_party/hamer
+
+# 2. conda env
+conda env create -f environment.yml
+conda run --no-capture-output -n wuji_ros python -m pip install --no-build-isolation \
+    "chumpy @ git+https://github.com/mattloper/chumpy@580566eafc9ac68b2614b64d6f7aaa84eebb70da"
+
+# 3. HaMeR checkpoint (공식 demo 데이터에서 필요한 것만)
+mkdir -p assets/mano assets/hamer/data
+wget -P scratch https://www.cs.utexas.edu/~pavlakos/hamer/data/hamer_demo_data.tar.gz
+tar --warning=no-unknown-keyword --exclude=".*" -xzf scratch/hamer_demo_data.tar.gz -C scratch \
+    _DATA/hamer_ckpts _DATA/data/mano_mean_params.npz
+mv scratch/_DATA/hamer_ckpts assets/hamer/hamer_ckpts
+mv scratch/_DATA/data/mano_mean_params.npz assets/hamer/data/
+rm -r scratch/_DATA scratch/hamer_demo_data.tar.gz
+```
+
+4. MANO: `MANO_RIGHT.pkl`은 라이선스 때문에 저장소에 없다.
+   - MANO 사이트(https://mano.is.tue.mpg.de, 가입 후 라이선스 동의)에서 받거나, 분석 서버의 `/home/user/wj/wuji_ros/assets/mano/MANO_RIGHT.pkl`을 복사한다.
+   - 복사한 파일은 `assets/mano/MANO_RIGHT.pkl`에 둔다. HaMeR도 같은 파일을 쓴다.
+
+```bash
+ln -sfn ../../mano assets/hamer/data/mano
+md5sum assets/mano/MANO_RIGHT.pkl   # fd5a9d35f914987cf1cc04ffe338caa1
+```
+
+5. 확인: 아래가 `2.0.1+cu118 True 1.23.5`를 출력하고, 두 파일이 보이면 된다.
+
+```bash
+conda run --no-capture-output -n wuji_ros python -c \
+    "import torch, smplx, chumpy, pytorch_lightning, cv2, trimesh, numpy; print(torch.__version__, torch.cuda.is_available(), numpy.__version__)"
+ls -lL assets/hamer/hamer_ckpts/checkpoints/hamer.ckpt assets/hamer/data/mano/MANO_RIGHT.pkl
+```
+
+설치 후 `assets/`는 다음과 같다(git이 무시하는 폴더).
+
+```
+assets/mano/MANO_RIGHT.pkl
+assets/hamer/data/mano -> ../../mano
+assets/hamer/data/mano_mean_params.npz
+assets/hamer/hamer_ckpts/model_config.yaml, dataset_config.yaml, checkpoints/hamer.ckpt
+```
+
+6. 첫 실행:
+   - 녹화 데이터를 아래 "입력 데이터 위치"대로 두고 `./annotate.sh`를 돌린다.
+   - `20261022_163051`을 복사해 돌렸다면 분석 서버 결과와 비교한다.
+     - `output/<세션>/contact/summary.json`의 `held_frames`가 25개인지 본다.
+     - 로그의 물체 "CAD fit RMSE"가 0.30 mm인지 본다.
+   - GPU가 달라 숫자가 조금 다를 수 있다.
 
 ## 입력 데이터 위치
 
@@ -44,6 +112,7 @@ wuji_ros/
 ```
 
 - yaml과 STL은 녹화 폴더 옆(부모 폴더)에서 찾는다. 하나뿐이어야 한다. 여러 개면 옵션으로 지정한다.
+  녹화 폴더를 심볼릭 링크로 두면 링크가 가리키는 실제 폴더 옆에서 찾는다.
 - 캘리브는 추정하지도 고치지도 않는다. 아래 순서에서 먼저 해당하는 것을 쓴다.
   1. `--calibration NAME`
   2. `wuji_ros/rig.py`의 `SESSION_CALIBRATION`에 적힌 값
