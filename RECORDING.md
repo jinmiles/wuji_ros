@@ -57,6 +57,8 @@ Connect → Enter Visualization. 아무것도 만지지 않았는데 촉각 히�
 cd ~/ros2_ws/src/wuji_ros && bash scripts/shells/glove_bridge.sh
 ```
 
+브리지는 연결할 때 촉각 접촉 민감도를 최대(3.0)로 설정한다. 다른 값은 `--tactile-sensitivity 1.0`처럼 붙인다.
+
 검색이 안 될 때
 
 ```bash

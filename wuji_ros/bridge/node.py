@@ -54,6 +54,10 @@ EXPECTED_STREAMS = ("emf_poses", "tip_poses", "hand_skeleton", "hand_joint_angle
 # Recording stops if one of these cannot be subscribed; the others are skipped when absent.
 REQUIRED_STREAMS = ("emf_poses", "hand_skeleton", "hand_joint_angles", "imu_raw/palm", "imu_data/palm", "tf_static")
 FIRST_FRAME_WAIT_S = 5.0
+# SDK-side contact sensitivity of tactile_binary (runtime range 0.5-3.0, larger = more sensitive, SDK default 1.0).
+# tactile and tactile_residual are not thresholded by it.
+TACTILE_SENSITIVITY_PARAM = "algorithms.tactile_binary.sensitivity"
+TACTILE_SENSITIVITY_RANGE = (0.5, 3.0)
 
 
 class BridgeError(RuntimeError):
@@ -411,6 +415,7 @@ def describe_glove(manager: Any, glove: Any) -> Dict[str, Any]:
                           "tip_poses": list(convert.FINGER_POSE_FIELDS),
                           "hand_skeleton": list(convert.SKELETON_FIELDS)},
         "tactile_shape": list(convert.TACTILE_SHAPE),
+        "tactile_binary_sensitivity": float(glove.get(TACTILE_SENSITIVITY_PARAM)),
         # Every topic the device offers, to check the bridge against what the SDK exposes.
         "sdk_topics": sorted(topic.path for topic in glove.topics() if topic.can_sub),
     }
@@ -429,7 +434,14 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
                              "(catches stamps taken before the SDK time sync)")
     parser.add_argument("--stall-timeout", type=float, default=2.0,
                         help="stop when emf_poses has not arrived for this long, s")
-    return parser.parse_args(argv)
+    parser.add_argument("--tactile-sensitivity", type=float, default=TACTILE_SENSITIVITY_RANGE[1],
+                        help="tactile_binary contact sensitivity set on connect, %g-%g (default: the most "
+                             "sensitive); recorded in info" % TACTILE_SENSITIVITY_RANGE)
+    args = parser.parse_args(argv)
+    lo, hi = TACTILE_SENSITIVITY_RANGE
+    if not lo <= args.tactile_sensitivity <= hi:
+        parser.error(f"--tactile-sensitivity must be in [{lo}, {hi}]")
+    return args
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -440,6 +452,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     manager, node = None, None
     try:
         manager, glove = connect_glove(args.sn, args.address)
+        try:
+            glove.set(TACTILE_SENSITIVITY_PARAM, args.tactile_sensitivity)
+        except WujiException as exc:
+            raise BridgeError(f"cannot set {TACTILE_SENSITIVITY_PARAM} to {args.tactile_sensitivity}: {exc}") from exc
         info = describe_glove(manager, glove)
         logger.info(f"glove: {json.dumps(info, sort_keys=True)}")
         node = GloveBridge(glove, info, args.max_clock_skew, args.stall_timeout)

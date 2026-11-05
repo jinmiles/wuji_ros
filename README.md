@@ -80,6 +80,7 @@ bash scripts/shells/record_glove.sh subj01_take01 --all   # 카메라 등 ROS �
   - 메타: `/wuji_glove/right/info`
 - 시작 5 s 안에 frame이 없는 스트림은 경고로 남는다(녹화는 계속).
 - 모든 `header.stamp`는 장치의 `timestamp_us`(EMF 샘플링 시각, UTC)다.
+- 연결할 때 촉각 접촉 민감도(SDK `algorithms.tactile_binary.sensitivity`, 0.5–3.0, SDK 기본 1.0)를 최대 3.0으로 설정하고 `info.tactile_binary_sensitivity`에 남긴다(`--tactile-sensitivity`로 변경). `tactile_binary`(접촉 판정)에만 쓰이고 `tactile`, `tactile_residual`은 그대로다(2026-11-05).
 - 멈추는 조건:
   - device stamp가 호스트 시계와 1 s 넘게 다를 때(time sync 전).
   - `emf_poses`가 2 s 동안 오지 않을 때.

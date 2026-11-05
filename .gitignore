@@ -8,3 +8,6 @@ scratch/
 
 # local symlinks to externally licensed / large model assets (README "자산")
 assets/
+
+# local Claude Code skills, rules and settings
+.claude/
